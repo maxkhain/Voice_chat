@@ -79,7 +79,6 @@ def send_audio(input_stream, output_stream, target_ip):
     
     sock = get_sender_socket()
     
-    packet_count = 0
     while True:
         try:
             # Read one frame from mic
@@ -93,9 +92,6 @@ def send_audio(input_stream, output_stream, target_ip):
                 packet = MESSAGE_TYPE_AUDIO + data
                 sock.sendto(packet, (target_ip, PORT))
                 _SEND_QUEUE_DEPTH = 0
-                packet_count += 1
-                if packet_count % 100 == 0:
-                    print(f"[Sender] Sent {packet_count} audio packets to {target_ip}")
             except BlockingIOError:
                 _SEND_QUEUE_DEPTH = 1
             

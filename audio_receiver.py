@@ -67,7 +67,6 @@ def receive_audio(output_stream):
     global _RECV_QUEUE_DEPTH
     
     sock = get_receiver_socket()
-    print("[Receiver] Audio receiver started, listening for packets...")
     
     while True:
         try:
@@ -91,20 +90,18 @@ def receive_audio(output_stream):
                 # Text message
                 try:
                     message = data[1:].decode('utf-8')
-                    print(f"[Receiver] Text message received: {message}")
                     if _text_message_callback:
                         _text_message_callback(message)
                 except Exception as e:
-                    print(f"[Receiver] Error decoding text message: {e}")
+                    pass
                 continue
             elif msg_type == MESSAGE_TYPE_AUDIO:
                 # Audio data - strip the message type byte
                 data = data[1:]
-                print(f"[Receiver] Audio packet received ({len(data)} bytes), deafened={_is_deafened}")
             else:
                 # Unknown message type or legacy audio (no type byte)
                 # Treat as audio data
-                print(f"[Receiver] Unknown message type {msg_type}, treating as audio")
+                pass
             
             # Audio data - drain old packets and keep latest
             drained = 0
@@ -134,10 +131,9 @@ def receive_audio(output_stream):
             if not _is_deafened:
                 try:
                     output_stream.write(latest_data)
-                    print(f"[Receiver] Audio written to output stream")
                 except Exception as e:
                     # Overflow; skip this frame only
-                    print(f"[Receiver] Error writing to output stream: {e}")
+                    pass
                 
         except BlockingIOError:
             time.sleep(0.001)
