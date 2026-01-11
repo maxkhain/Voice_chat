@@ -3,6 +3,7 @@ import customtkinter as ctk
 import threading
 from audio_io import (
     get_audio_interface,
+    get_input_devices,
     open_input_stream,
     open_output_stream,
     close_stream,
@@ -83,6 +84,7 @@ class DiscordApp(ctk.CTk):
         self.receiver_thread = None
         self.sender_thread = None
         self.is_connected = False
+        self.selected_device_index = 0
         
         # Window Setup
         self.title("Local Discord")
@@ -98,6 +100,21 @@ class DiscordApp(ctk.CTk):
 
         self.logo_label = ctk.CTkLabel(self.sidebar, text="DISCORD P2P", font=ctk.CTkFont(size=20, weight="bold"))
         self.logo_label.pack(pady=20)
+
+        # Device Selection
+        self.device_label = ctk.CTkLabel(self.sidebar, text="Microphone:", font=ctk.CTkFont(size=12))
+        self.device_label.pack(pady=(10, 5), padx=10)
+        
+        self.device_combo = ctk.CTkComboBox(
+            self.sidebar,
+            values=[],
+            state="readonly",
+            command=self.on_device_selected
+        )
+        self.device_combo.pack(pady=(0, 10), padx=10, fill="x")
+        
+        # Populate device list
+        self.populate_devices()
 
         # IP Input
         self.ip_entry = ctk.CTkEntry(self.sidebar, placeholder_text="Enter Friend's IP")
@@ -136,6 +153,30 @@ class DiscordApp(ctk.CTk):
         self.send_btn = ctk.CTkButton(self.entry_frame, text="Send", width=60, command=self.send_msg)
         self.send_btn.pack(side="right")
 
+    def populate_devices(self):
+        """Populate the device combobox with available input devices."""
+        try:
+            temp_interface = get_audio_interface()
+            devices = get_input_devices(temp_interface)
+            
+            if devices:
+                device_names = [f"{idx}: {name}" for idx, name in devices]
+                self.device_combo.configure(values=device_names)
+                self.device_combo.set(device_names[0])
+                self.selected_device_index = devices[0][0]
+            
+            temp_interface.terminate()
+        except Exception as e:
+            print(f"Error populating devices: {e}")
+    
+    def on_device_selected(self, choice):
+        """Handle device selection from combobox."""
+        if choice:
+            # Extract device index from the choice string (e.g., "0: Built-in Microphone")
+            device_index = int(choice.split(":")[0])
+            self.selected_device_index = device_index
+            print(f"Selected device: {choice}")
+
     def connect(self):
         target = self.ip_entry.get()
         if not target: 
@@ -144,7 +185,7 @@ class DiscordApp(ctk.CTk):
         try:
             self.target_ip = target
             self.audio_interface = get_audio_interface()
-            self.input_stream = open_input_stream(self.audio_interface, 0)
+            self.input_stream = open_input_stream(self.audio_interface, self.selected_device_index)
             self.output_stream = open_output_stream(self.audio_interface)
             
             reset_noise_profile()
