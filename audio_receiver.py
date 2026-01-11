@@ -13,6 +13,19 @@ sock = None
 # Global state tracking
 _RECV_QUEUE_DEPTH = 0
 
+# Message type constants
+MESSAGE_TYPE_AUDIO = b'\x00'
+MESSAGE_TYPE_TEXT = b'\x01'
+
+# Callback for receiving text messages
+_text_message_callback = None
+
+
+def set_text_message_callback(callback):
+    """Set the callback function to be called when a text message is received."""
+    global _text_message_callback
+    _text_message_callback = callback
+
 
 def initialize_receiver_socket():
     """Initialize and configure UDP socket for receiving audio."""
@@ -37,6 +50,7 @@ def get_receiver_socket():
 def receive_audio(output_stream):
     """
     Receive and play latest packet only; discard old ones if backlog exists.
+    Also handles text messages.
     
     Args:
         output_stream: PyAudio output stream (speakers)
@@ -57,7 +71,18 @@ def receive_audio(output_stream):
             # Receive the first packet
             data, _ = sock.recvfrom(CHUNK * 4)
             
-            # Drain ONLY older packets in buffer; keep the latest one
+            # Check message type
+            if data and data[0:1] == MESSAGE_TYPE_TEXT:
+                # Text message
+                try:
+                    message = data[1:].decode('utf-8')
+                    if _text_message_callback:
+                        _text_message_callback(message)
+                except Exception as e:
+                    print(f"Error decoding text message: {e}")
+                continue
+            
+            # Audio data - drain old packets and keep latest
             drained = 0
             latest_data = data
             while drained < 5:
