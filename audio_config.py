@@ -13,13 +13,13 @@ PORT = 6000
 # --- FILTER ENABLE/DISABLE (independently toggleable) ---
 FILTER_ENABLED = {
     'high_pass': False,           # Remove low-frequency rumble/hum
-    'low_pass': True,            # Remove high-frequency noise (ENABLED)
-    'noise_gate': True,          # Mute quiet frames below threshold (ENABLED)
-    'spectral_subtraction': True,   # Subtract learned noise from spectrum (ENABLED)
-    'compressor': True,          # Compress dynamic range (ENABLED)
-    'limiter': True,             # Prevent clipping/distortion (ENABLED)
+    'low_pass': False,            # Remove high-frequency noise (ENABLED)
+    'noise_gate': False,          # Mute quiet frames below threshold (ENABLED)
+    'spectral_subtraction': False,   # Subtract learned noise from spectrum (ENABLED)
+    'compressor': False,          # Compress dynamic range (ENABLED)
+    'limiter': False,             # Prevent clipping/distortion (ENABLED)
     'eq_3band': False,           # 3-band equalizer (low, mid, high)
-    'notch': True,               # Remove specific frequency (e.g., 60Hz hum) (ENABLED)
+    'notch': False,               # Remove specific frequency (e.g., 60Hz hum) (ENABLED)
     'gain': False,               # Amplify or reduce signal level
 }
 
