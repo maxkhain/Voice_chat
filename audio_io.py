@@ -33,6 +33,29 @@ def get_input_devices(p):
     return devices
 
 
+def get_output_devices(p):
+    """
+    Get list of available output devices.
+    
+    Args:
+        p: PyAudio instance
+        
+    Returns:
+        List of tuples: (device_index, device_name)
+    """
+    devices = []
+    info = p.get_host_api_info_by_index(0)
+    numdevices = info.get('deviceCount')
+    
+    for i in range(numdevices):
+        device_info = p.get_device_info_by_host_api_device_index(0, i)
+        if device_info.get('maxOutputChannels') > 0:
+            name = device_info.get('name')
+            devices.append((i, name))
+    
+    return devices
+
+
 def open_input_stream(p, input_device_index):
     """
     Open an audio input stream (microphone).
@@ -54,23 +77,29 @@ def open_input_stream(p, input_device_index):
     )
 
 
-def open_output_stream(p):
+def open_output_stream(p, output_device_index=None):
     """
     Open an audio output stream (speakers).
     
     Args:
         p: PyAudio instance
+        output_device_index: Device index for output (None = default device)
         
     Returns:
         Output stream object
     """
-    return p.open(
-        format=FORMAT,
-        channels=CHANNELS,
-        rate=RATE,
-        output=True,
-        frames_per_buffer=CHUNK
-    )
+    kwargs = {
+        "format": FORMAT,
+        "channels": CHANNELS,
+        "rate": RATE,
+        "output": True,
+        "frames_per_buffer": CHUNK
+    }
+    
+    if output_device_index is not None:
+        kwargs["output_device_index"] = output_device_index
+    
+    return p.open(**kwargs)
 
 
 def close_stream(stream):

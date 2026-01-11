@@ -4,13 +4,14 @@ import threading
 from audio_io import (
     get_audio_interface,
     get_input_devices,
+    get_output_devices,
     open_input_stream,
     open_output_stream,
     close_stream,
     close_audio_interface
 )
 from audio_sender import send_audio, cleanup_sender, send_text_message
-from audio_receiver import receive_audio, cleanup_receiver, set_text_message_callback
+from audio_receiver import receive_audio, cleanup_receiver, set_text_message_callback, set_deafen_state, set_deafen_state
 from audio_filter import reset_noise_profile
 
 
@@ -85,6 +86,7 @@ class DiscordApp(ctk.CTk):
         self.sender_thread = None
         self.is_connected = False
         self.selected_device_index = 0
+        self.selected_output_device_index = None  # Use default if None
         
         # Window Setup
         self.title("Local Discord")
@@ -117,6 +119,21 @@ class DiscordApp(ctk.CTk):
         
         # Populate device list
         self.populate_devices()
+
+        # Output Device Selection
+        self.output_label = ctk.CTkLabel(self.sidebar, text="Speaker:", font=ctk.CTkFont(size=12))
+        self.output_label.pack(pady=(10, 5), padx=10)
+        
+        self.output_combo = ctk.CTkComboBox(
+            self.sidebar,
+            values=[],
+            state="readonly",
+            command=self.on_output_device_selected
+        )
+        self.output_combo.pack(pady=(0, 10), padx=10, fill="x")
+        
+        # Populate output device list
+        self.populate_output_devices()
 
         # IP Input
         self.ip_entry = ctk.CTkEntry(self.sidebar, placeholder_text="Enter Friend's IP")
@@ -180,6 +197,30 @@ class DiscordApp(ctk.CTk):
             self.selected_device_index = device_index
             print(f"Selected device: {choice}")
 
+    def populate_output_devices(self):
+        """Populate the output device combobox with available output devices."""
+        try:
+            temp_interface = get_audio_interface()
+            devices = get_output_devices(temp_interface)
+            
+            if devices:
+                device_names = [f"{idx}: {name}" for idx, name in devices]
+                self.output_combo.configure(values=device_names)
+                self.output_combo.set(device_names[0])
+                self.selected_output_device_index = devices[0][0]
+            
+            temp_interface.terminate()
+        except Exception as e:
+            print(f"Error populating output devices: {e}")
+    
+    def on_output_device_selected(self, choice):
+        """Handle output device selection from combobox."""
+        if choice:
+            # Extract device index from the choice string
+            device_index = int(choice.split(":")[0])
+            self.selected_output_device_index = device_index
+            print(f"Selected output device: {choice}")
+
     def connect(self):
         target = self.ip_entry.get()
         if not target: 
@@ -189,12 +230,13 @@ class DiscordApp(ctk.CTk):
             self.target_ip = target
             self.audio_interface = get_audio_interface()
             self.input_stream = open_input_stream(self.audio_interface, self.selected_device_index)
-            self.output_stream = open_output_stream(self.audio_interface)
+            self.output_stream = open_output_stream(self.audio_interface, self.selected_output_device_index)
             
             reset_noise_profile()
             
-            # Set up text message callback
+            # Set up text message callback and sync deafen state
             set_text_message_callback(self.receive_msg_update)
+            set_deafen_state(self.is_deafened)
             
             # Start receiver thread (listens for incoming audio)
             self.receiver_thread = threading.Thread(
@@ -233,6 +275,7 @@ class DiscordApp(ctk.CTk):
 
     def toggle_deafen(self):
         self.is_deafened = self.deafen_btn.get()
+        set_deafen_state(self.is_deafened)
         print(f"Deafened: {self.is_deafened}")
 
     def send_msg(self, event=None):

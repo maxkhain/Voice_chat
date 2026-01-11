@@ -20,11 +20,20 @@ MESSAGE_TYPE_TEXT = b'\x01'
 # Callback for receiving text messages
 _text_message_callback = None
 
+# Audio state
+_is_deafened = False
+
 
 def set_text_message_callback(callback):
     """Set the callback function to be called when a text message is received."""
     global _text_message_callback
     _text_message_callback = callback
+
+
+def set_deafen_state(is_deafened):
+    """Set whether audio output should be deafened (muted)."""
+    global _is_deafened
+    _is_deafened = is_deafened
 
 
 def initialize_receiver_socket():
@@ -58,6 +67,7 @@ def receive_audio(output_stream):
     global _RECV_QUEUE_DEPTH
     
     sock = get_receiver_socket()
+    print("[Receiver] Audio receiver started, listening for packets...")
     
     while True:
         try:
@@ -71,16 +81,30 @@ def receive_audio(output_stream):
             # Receive the first packet
             data, _ = sock.recvfrom(CHUNK * 4)
             
-            # Check message type
-            if data and data[0:1] == MESSAGE_TYPE_TEXT:
+            # Check message type (first byte)
+            if not data:
+                continue
+                
+            msg_type = data[0:1]
+            
+            if msg_type == MESSAGE_TYPE_TEXT:
                 # Text message
                 try:
                     message = data[1:].decode('utf-8')
+                    print(f"[Receiver] Text message received: {message}")
                     if _text_message_callback:
                         _text_message_callback(message)
                 except Exception as e:
-                    print(f"Error decoding text message: {e}")
+                    print(f"[Receiver] Error decoding text message: {e}")
                 continue
+            elif msg_type == MESSAGE_TYPE_AUDIO:
+                # Audio data - strip the message type byte
+                data = data[1:]
+                print(f"[Receiver] Audio packet received ({len(data)} bytes), deafened={_is_deafened}")
+            else:
+                # Unknown message type or legacy audio (no type byte)
+                # Treat as audio data
+                print(f"[Receiver] Unknown message type {msg_type}, treating as audio")
             
             # Audio data - drain old packets and keep latest
             drained = 0
@@ -90,7 +114,13 @@ def receive_audio(output_stream):
                     ready = select.select([sock], [], [], 0)
                     if not ready[0]:
                         break
-                    latest_data, _ = sock.recvfrom(CHUNK * 4)
+                    packet, _ = sock.recvfrom(CHUNK * 4)
+                    # Strip message type byte if present
+                    if packet and packet[0:1] == MESSAGE_TYPE_AUDIO:
+                        latest_data = packet[1:]
+                    else:
+                        # Treat as audio (legacy or unknown type)
+                        latest_data = packet
                     drained += 1
                 except BlockingIOError:
                     break
@@ -100,11 +130,14 @@ def receive_audio(output_stream):
             audio_sender.set_recv_queue_depth(drained)
             
             # Play ONLY the latest packet (discard old ones)
-            try:
-                output_stream.write(latest_data)
-            except Exception:
-                # Overflow; skip this frame only
-                pass
+            # But only if not deafened
+            if not _is_deafened:
+                try:
+                    output_stream.write(latest_data)
+                    print(f"[Receiver] Audio written to output stream")
+                except Exception as e:
+                    # Overflow; skip this frame only
+                    print(f"[Receiver] Error writing to output stream: {e}")
                 
         except BlockingIOError:
             time.sleep(0.001)
