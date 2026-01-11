@@ -13,65 +13,19 @@ from audio_io import (
 from audio_sender import send_audio, cleanup_sender, send_text_message
 from audio_receiver import receive_audio, cleanup_receiver, set_text_message_callback, set_deafen_state, set_deafen_state
 from audio_filter import reset_noise_profile
+from connection_cache import (
+    get_last_connection,
+    get_last_microphone,
+    get_last_speaker,
+    has_cached_connection,
+    save_cache,
+)
 
 
 # --- APPEARANCE ---
 ctk.set_appearance_mode("Dark")  # Modes: "System", "Dark", "Light"
 ctk.set_default_color_theme("blue")  # Themes: "blue", "green", "dark-blue"
 
-
-def pick_microphone(p):
-    """
-    List all available microphones and ask user to select one.
-    
-    Args:
-        p: PyAudio instance
-        
-    Returns:
-        Device index of selected microphone
-        
-    Raises:
-        SystemExit: If no microphones are found
-    """
-    print("\n--- Available Microphones ---")
-    info = p.get_host_api_info_by_index(0)
-    numdevices = info.get('deviceCount')
-    input_devices = []
-
-    for i in range(0, numdevices):
-        if (p.get_device_info_by_host_api_device_index(0, i).get('maxInputChannels')) > 0:
-            name = p.get_device_info_by_host_api_device_index(0, i).get('name')
-            input_devices.append(i)
-            print(f"ID {i}: {name}")
-
-    if not input_devices:
-        print("❌ No microphone found!")
-        exit()
-        
-    device_id = int(input("\nEnter the ID of the microphone you want to use: "))
-    return device_id
-
-
-def get_target_ip():
-    """
-    Prompt user for target IP address.
-    
-    Returns:
-        IP address string
-    """
-    target_ip = input("\nEnter the IP address of the OTHER person: ")
-    return target_ip
-
-
-def display_welcome_message():
-    """Display welcome message."""
-    print("\n🎙️  Local Voice Chat - Low Latency Audio")
-    print("=" * 50)
-
-
-def display_goodbye_message():
-    """Display goodbye message."""
-    print("\n\n👋 Voice chat ended. Goodbye!")
 
 class DiscordApp(ctk.CTk):
     def __init__(self):
@@ -87,6 +41,11 @@ class DiscordApp(ctk.CTk):
         self.is_connected = False
         self.selected_device_index = 0
         self.selected_output_device_index = None  # Use default if None
+        
+        # Load cached values
+        last_ip = get_last_connection()
+        last_mic = get_last_microphone()
+        last_speaker = get_last_speaker()
         
         # Window Setup
         self.title("Local Discord")
@@ -117,8 +76,8 @@ class DiscordApp(ctk.CTk):
         )
         self.device_combo.pack(pady=(0, 10), padx=10, fill="x")
         
-        # Populate device list
-        self.populate_devices()
+        # Populate device list and select cached device
+        self.populate_devices(last_mic)
 
         # Output Device Selection
         self.output_label = ctk.CTkLabel(self.sidebar, text="Speaker:", font=ctk.CTkFont(size=12))
@@ -133,11 +92,13 @@ class DiscordApp(ctk.CTk):
         self.output_combo.pack(pady=(0, 10), padx=10, fill="x")
         
         # Populate output device list
-        self.populate_output_devices()
+        self.populate_output_devices(last_speaker)
 
-        # IP Input
+        # IP Input with cached value
         self.ip_entry = ctk.CTkEntry(self.sidebar, placeholder_text="Enter Friend's IP")
-        self.ip_entry.pack(pady=10, padx=10, fill="x")
+        if last_ip:
+            self.ip_entry.insert(0, last_ip)
+        self.ip_entry.pack(pady=10, padx=10)
 
         # Connect Button
         self.connect_btn = ctk.CTkButton(self.sidebar, text="Connect Voice/Chat", command=self.connect)
@@ -173,7 +134,7 @@ class DiscordApp(ctk.CTk):
         self.send_btn = ctk.CTkButton(self.entry_frame, text="Send", width=60, command=self.send_msg)
         self.send_btn.pack(side="right")
 
-    def populate_devices(self):
+    def populate_devices(self, cached_device_id=None):
         """Populate the device combobox with available input devices."""
         try:
             temp_interface = get_audio_interface()
@@ -182,8 +143,21 @@ class DiscordApp(ctk.CTk):
             if devices:
                 device_names = [f"{idx}: {name}" for idx, name in devices]
                 self.device_combo.configure(values=device_names)
-                self.device_combo.set(device_names[0])
-                self.selected_device_index = devices[0][0]
+                
+                # Select cached device if available, otherwise first device
+                if cached_device_id is not None:
+                    for device_name in device_names:
+                        if device_name.startswith(f"{cached_device_id}:"):
+                            self.device_combo.set(device_name)
+                            self.selected_device_index = cached_device_id
+                            break
+                    else:
+                        # Cached device not found, use first
+                        self.device_combo.set(device_names[0])
+                        self.selected_device_index = devices[0][0]
+                else:
+                    self.device_combo.set(device_names[0])
+                    self.selected_device_index = devices[0][0]
             
             temp_interface.terminate()
         except Exception as e:
@@ -197,7 +171,7 @@ class DiscordApp(ctk.CTk):
             self.selected_device_index = device_index
             print(f"Selected device: {choice}")
 
-    def populate_output_devices(self):
+    def populate_output_devices(self, cached_device_id=None):
         """Populate the output device combobox with available output devices."""
         try:
             temp_interface = get_audio_interface()
@@ -206,8 +180,21 @@ class DiscordApp(ctk.CTk):
             if devices:
                 device_names = [f"{idx}: {name}" for idx, name in devices]
                 self.output_combo.configure(values=device_names)
-                self.output_combo.set(device_names[0])
-                self.selected_output_device_index = devices[0][0]
+                
+                # Select cached device if available, otherwise first device
+                if cached_device_id is not None:
+                    for device_name in device_names:
+                        if device_name.startswith(f"{cached_device_id}:"):
+                            self.output_combo.set(device_name)
+                            self.selected_output_device_index = cached_device_id
+                            break
+                    else:
+                        # Cached device not found, use first
+                        self.output_combo.set(device_names[0])
+                        self.selected_output_device_index = devices[0][0]
+                else:
+                    self.output_combo.set(device_names[0])
+                    self.selected_output_device_index = devices[0][0]
             
             temp_interface.terminate()
         except Exception as e:
@@ -231,6 +218,9 @@ class DiscordApp(ctk.CTk):
             self.audio_interface = get_audio_interface()
             self.input_stream = open_input_stream(self.audio_interface, self.selected_device_index)
             self.output_stream = open_output_stream(self.audio_interface, self.selected_output_device_index)
+            
+            # Save connection to cache
+            save_cache(target, self.selected_device_index, self.selected_output_device_index)
             
             reset_noise_profile()
             
