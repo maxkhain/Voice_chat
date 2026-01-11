@@ -3,9 +3,9 @@ Main application entry point for Local Voice Chat.
 
 Launches the GUI application.
 """
-from ui import DiscordApp
+from ui import HexChatApp
 
 
 if __name__ == "__main__":
-    app = DiscordApp()
+    app = HexChatApp()
     app.mainloop()

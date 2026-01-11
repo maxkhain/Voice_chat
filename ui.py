@@ -27,7 +27,7 @@ ctk.set_appearance_mode("Dark")  # Modes: "System", "Dark", "Light"
 ctk.set_default_color_theme("blue")  # Themes: "blue", "green", "dark-blue"
 
 
-class DiscordApp(ctk.CTk):
+class HexChatApp(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.audio_interface = None
@@ -48,7 +48,7 @@ class DiscordApp(ctk.CTk):
         last_speaker = get_last_speaker()
         
         # Window Setup
-        self.title("Local Discord")
+        self.title("HexChat")
         self.geometry("800x600")
 
         # --- LAYOUT GRID ---
@@ -61,7 +61,7 @@ class DiscordApp(ctk.CTk):
         self.sidebar.grid(row=0, column=0, sticky="nsew")
         self.sidebar.grid_propagate(False)  # Keep sidebar at fixed width
 
-        self.logo_label = ctk.CTkLabel(self.sidebar, text="DISCORD P2P", font=ctk.CTkFont(size=20, weight="bold"))
+        self.logo_label = ctk.CTkLabel(self.sidebar, text="HEXCHAT P2P", font=ctk.CTkFont(size=20, weight="bold"))
         self.logo_label.pack(pady=20)
 
         # Device Selection
@@ -292,5 +292,5 @@ class DiscordApp(ctk.CTk):
         self.chat_box.see("end")
 
 if __name__ == "__main__":
-    app = DiscordApp()
+    app = HexChatApp()
     app.mainloop()
