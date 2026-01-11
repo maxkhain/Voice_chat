@@ -424,16 +424,8 @@ def apply_all_enabled_filters(audio_bytes):
 
 def reset_all_filters():
     """Reset all filter states for a fresh session."""
-    global (
-        _NOISE_PROFILE,
-        _LEARNING_FRAME_COUNT,
-        _HP_FILTER_STATE,
-        _LP_FILTER_STATE,
-        _GATE_ENVELOPE,
-        _COMPRESSOR_ENVELOPE,
-        _NOTCH_FILTER_STATE_1,
-        _NOTCH_FILTER_STATE_2,
-    )
+    global _NOISE_PROFILE, _LEARNING_FRAME_COUNT, _HP_FILTER_STATE, _LP_FILTER_STATE
+    global _GATE_ENVELOPE, _COMPRESSOR_ENVELOPE, _NOTCH_FILTER_STATE_1, _NOTCH_FILTER_STATE_2
     
     _NOISE_PROFILE = None
     _LEARNING_FRAME_COUNT = 0

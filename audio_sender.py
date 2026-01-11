@@ -18,6 +18,10 @@ _RECV_QUEUE_DEPTH = 0
 # For visual feedback
 VISUAL_THROTTLE = 0.1
 
+# Message type constants
+MESSAGE_TYPE_AUDIO = b'\x00'
+MESSAGE_TYPE_TEXT = b'\x01'
+
 
 def initialize_sender_socket():
     """Initialize and configure UDP socket for sending audio."""
@@ -40,6 +44,23 @@ def set_recv_queue_depth(depth):
     """Update received packet queue depth for UI display."""
     global _RECV_QUEUE_DEPTH
     _RECV_QUEUE_DEPTH = depth
+
+
+def send_text_message(message, target_ip):
+    """
+    Send a text message to the target IP.
+    
+    Args:
+        message: Text message to send
+        target_ip: Target IP address
+    """
+    try:
+        sock = get_sender_socket()
+        # Prepend message type byte and encode text
+        packet = MESSAGE_TYPE_TEXT + message.encode('utf-8')
+        sock.sendto(packet, (target_ip, PORT))
+    except Exception as e:
+        print(f"Error sending text message: {e}")
 
 
 def send_audio(input_stream, output_stream, target_ip):

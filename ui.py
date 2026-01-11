@@ -9,8 +9,8 @@ from audio_io import (
     close_stream,
     close_audio_interface
 )
-from audio_sender import send_audio, cleanup_sender
-from audio_receiver import receive_audio, cleanup_receiver
+from audio_sender import send_audio, cleanup_sender, send_text_message
+from audio_receiver import receive_audio, cleanup_receiver, set_text_message_callback
 from audio_filter import reset_noise_profile
 from connection_cache import (
     get_last_connection,
@@ -48,12 +48,14 @@ class DiscordApp(ctk.CTk):
         self.geometry("800x600")
 
         # --- LAYOUT GRID ---
-        self.grid_columnconfigure(1, weight=1) # Chat area expands
-        self.grid_rowconfigure(0, weight=1)
+        self.grid_columnconfigure(0, weight=0)  # Sidebar fixed width
+        self.grid_columnconfigure(1, weight=1)  # Chat area expands
+        self.grid_rowconfigure(0, weight=1)     # Content expands vertically
 
         # --- SIDEBAR (LEFT) ---
         self.sidebar = ctk.CTkFrame(self, width=200, corner_radius=0)
         self.sidebar.grid(row=0, column=0, sticky="nsew")
+        self.sidebar.grid_propagate(False)  # Keep sidebar at fixed width
 
         self.logo_label = ctk.CTkLabel(self.sidebar, text="DISCORD P2P", font=ctk.CTkFont(size=20, weight="bold"))
         self.logo_label.pack(pady=20)
@@ -81,7 +83,7 @@ class DiscordApp(ctk.CTk):
 
         # Connect Button
         self.connect_btn = ctk.CTkButton(self.sidebar, text="Connect Voice/Chat", command=self.connect)
-        self.connect_btn.pack(pady=10, padx=10)
+        self.connect_btn.pack(pady=10, padx=10, fill="x")
 
         # Voice Controls
         self.mute_btn = ctk.CTkSwitch(self.sidebar, text="Mute Mic", command=self.toggle_mute)
@@ -104,6 +106,7 @@ class DiscordApp(ctk.CTk):
         # Message Input
         self.entry_frame = ctk.CTkFrame(self.chat_frame, fg_color="transparent")
         self.entry_frame.grid(row=1, column=0, sticky="ew", padx=10, pady=10)
+        self.entry_frame.grid_columnconfigure(0, weight=1)
         
         self.msg_entry = ctk.CTkEntry(self.entry_frame, placeholder_text="Message @Friend")
         self.msg_entry.pack(side="left", fill="both", expand=True, padx=(0, 10))
@@ -165,6 +168,9 @@ class DiscordApp(ctk.CTk):
             
             reset_noise_profile()
             
+            # Set up text message callback
+            set_text_message_callback(self.receive_msg_update)
+            
             # Start receiver thread (listens for incoming audio)
             self.receiver_thread = threading.Thread(
                 target=receive_audio,
@@ -214,7 +220,10 @@ class DiscordApp(ctk.CTk):
         self.chat_box.configure(state="disabled")
         self.chat_box.see("end")
 
-        # TODO: Send to network
+        # Send to network
+        if self.is_connected and self.target_ip:
+            send_text_message(msg, self.target_ip)
+        
         self.msg_entry.delete(0, "end")
 
     def receive_msg_update(self, message):
