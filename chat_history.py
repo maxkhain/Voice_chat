@@ -1,7 +1,7 @@
 """
 Chat history management for saving and loading message history.
 
-Stores messages per contact with timestamps in JSON format.
+Stores all messages from all contacts in a single consolidated JSON file.
 Automatically creates backups after each message.
 """
 import json
@@ -12,55 +12,75 @@ from pathlib import Path
 from typing import List, Dict
 
 
-# Chat history directory
-HISTORY_DIR = Path(__file__).parent / ".chat_history"
-HISTORY_DIR.mkdir(exist_ok=True)
+# Single consolidated chat history file
+HISTORY_FILE = Path(__file__).parent / ".chat_history.json"
 
 # Backup directory
 BACKUP_DIR = Path(__file__).parent / ".chat_backups"
 BACKUP_DIR.mkdir(exist_ok=True)
 
+# Initialize history file if it doesn't exist
+if not HISTORY_FILE.exists():
+    with open(HISTORY_FILE, 'w') as f:
+        json.dump({}, f, indent=2)
 
-def get_history_file(contact_ip: str) -> Path:
+
+def load_all_chats() -> Dict:
     """
-    Get the history file path for a contact.
+    Load the entire chat database.
+    
+    Returns:
+        Dict: All chats organized by contact IP
+    """
+    try:
+        if HISTORY_FILE.exists():
+            with open(HISTORY_FILE, 'r') as f:
+                return json.load(f)
+    except Exception as e:
+        print(f"[ERROR] Could not load chat database: {e}")
+    
+    return {}
+
+
+def save_all_chats(chats: Dict) -> bool:
+    """
+    Save the entire chat database.
     
     Args:
-        contact_ip: IP address of the contact
+        chats: Dictionary of all chats by contact IP
         
     Returns:
-        Path: Path to the history file
+        bool: True if successful
     """
-    # Sanitize IP for filename
-    safe_name = contact_ip.replace('.', '_')
-    return HISTORY_DIR / f"chat_{safe_name}.json"
+    try:
+        with open(HISTORY_FILE, 'w') as f:
+            json.dump(chats, f, indent=2)
+        return True
+    except Exception as e:
+        print(f"[ERROR] Could not save chat database: {e}")
+        return False
 
 
-def backup_history(contact_ip: str) -> bool:
+def backup_history() -> bool:
     """
-    Create a backup copy of chat history after each message.
+    Create a backup copy of entire chat history.
     
-    Args:
-        contact_ip: IP address of the contact
-        
     Returns:
         bool: True if backup successful
     """
     try:
-        history_file = get_history_file(contact_ip)
-        if not history_file.exists():
+        if not HISTORY_FILE.exists():
             return True
         
         # Create backup with timestamp
-        safe_name = contact_ip.replace('.', '_')
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        backup_file = BACKUP_DIR / f"chat_{safe_name}_backup_{timestamp}.json"
+        backup_file = BACKUP_DIR / f"chat_history_backup_{timestamp}.json"
         
         # Copy file
-        shutil.copy2(history_file, backup_file)
+        shutil.copy2(HISTORY_FILE, backup_file)
         
-        # Keep only last 10 backups per contact
-        backups = sorted(BACKUP_DIR.glob(f"chat_{safe_name}_backup_*.json"))
+        # Keep only last 10 backups
+        backups = sorted(BACKUP_DIR.glob("chat_history_backup_*.json"))
         if len(backups) > 10:
             for old_backup in backups[:-10]:
                 old_backup.unlink()
@@ -73,7 +93,7 @@ def backup_history(contact_ip: str) -> bool:
 
 def add_message(contact_ip: str, sender: str, message: str) -> bool:
     """
-    Add a message to chat history and create backup.
+    Add a message to chat history.
     
     Args:
         contact_ip: IP address of the contact
@@ -84,13 +104,12 @@ def add_message(contact_ip: str, sender: str, message: str) -> bool:
         bool: True if successful
     """
     try:
-        history_file = get_history_file(contact_ip)
+        # Load all chats
+        chats = load_all_chats()
         
-        # Load existing messages
-        messages = []
-        if history_file.exists():
-            with open(history_file, 'r') as f:
-                messages = json.load(f)
+        # Initialize contact if not exists
+        if contact_ip not in chats:
+            chats[contact_ip] = []
         
         # Add new message
         msg_obj = {
@@ -98,14 +117,11 @@ def add_message(contact_ip: str, sender: str, message: str) -> bool:
             'sender': sender,
             'message': message
         }
-        messages.append(msg_obj)
+        chats[contact_ip].append(msg_obj)
         
-        # Save messages
-        with open(history_file, 'w') as f:
-            json.dump(messages, f, indent=2)
-        
-        # Create backup after each message
-        backup_history(contact_ip)
+        # Save all chats
+        if not save_all_chats(chats):
+            return False
         
         return True
     except Exception as e:
@@ -115,7 +131,7 @@ def add_message(contact_ip: str, sender: str, message: str) -> bool:
 
 def load_history(contact_ip: str) -> List[Dict]:
     """
-    Load chat history for a contact.
+    Load chat history for a contact from consolidated file.
     
     Args:
         contact_ip: IP address of the contact
@@ -124,15 +140,8 @@ def load_history(contact_ip: str) -> List[Dict]:
         List[Dict]: List of message objects with timestamp, sender, message
     """
     try:
-        history_file = get_history_file(contact_ip)
-        
-        if not history_file.exists():
-            return []
-        
-        with open(history_file, 'r') as f:
-            messages = json.load(f)
-        
-        return messages
+        chats = load_all_chats()
+        return chats.get(contact_ip, [])
     except Exception as e:
         print(f"[ERROR] Could not load history: {e}")
         return []
@@ -140,7 +149,7 @@ def load_history(contact_ip: str) -> List[Dict]:
 
 def clear_history(contact_ip: str) -> bool:
     """
-    Clear chat history for a contact.
+    Clear chat history for a specific contact.
     
     Args:
         contact_ip: IP address of the contact
@@ -149,9 +158,10 @@ def clear_history(contact_ip: str) -> bool:
         bool: True if successful
     """
     try:
-        history_file = get_history_file(contact_ip)
-        if history_file.exists():
-            history_file.unlink()
+        chats = load_all_chats()
+        if contact_ip in chats:
+            del chats[contact_ip]
+            save_all_chats(chats)
             print(f"[OK] History cleared for {contact_ip}")
         return True
     except Exception as e:
@@ -215,14 +225,8 @@ def get_contact_list() -> List[str]:
         List[str]: List of contact IPs
     """
     try:
-        contacts = []
-        if HISTORY_DIR.exists():
-            for file in HISTORY_DIR.glob("chat_*.json"):
-                # Extract IP from filename
-                name = file.stem.replace("chat_", "")
-                ip = name.replace("_", ".")
-                contacts.append(ip)
-        return sorted(contacts)
+        chats = load_all_chats()
+        return sorted(chats.keys())
     except Exception:
         return []
 
@@ -265,3 +269,22 @@ def display_history(contact_ip: str, max_messages: int = None) -> str:
         lines.append(f"[{timestamp}] {sender}: {text}")
     
     return "\n".join(lines) if lines else "(No messages)"
+
+
+def get_formatted_message(sender: str, message: str, timestamp: str = None) -> str:
+    """
+    Format a single message with timestamp for display.
+    
+    Args:
+        sender: Message sender name
+        message: Message text
+        timestamp: ISO timestamp (uses current time if not provided)
+        
+    Returns:
+        str: Formatted message string
+    """
+    if timestamp is None:
+        timestamp = datetime.now().isoformat()
+    
+    formatted_time = format_timestamp(timestamp)
+    return f"[{formatted_time}] {sender}: {message}"

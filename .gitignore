@@ -132,6 +132,9 @@ dmypy.json
 
 # Project-specific
 .connection_cache.json
+.chat_history.json
+.chat_backups/
+.chat_history_old/
 *.wav
 *.mp3
 audio_recordings/

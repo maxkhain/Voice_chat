@@ -20,7 +20,7 @@ from connection_cache import (
     has_cached_connection,
     save_cache,
 )
-from chat_history import add_message, load_history, display_history, clear_history
+from chat_history import add_message, load_history, display_history, clear_history, get_formatted_message, format_timestamp
 
 
 # --- APPEARANCE ---
@@ -298,18 +298,26 @@ class HexChatApp(ctk.CTk):
             if not self.audio_interface:
                 self.audio_interface = get_audio_interface()
             
-            # Load previous chat history with this contact
+            # Clear chat box and load full chat history with this contact
+            self.chat_box.configure(state="normal")
+            self.chat_box.delete("1.0", "end")
+            
             history = load_history(target)
             if history:
-                self.chat_box.configure(state="normal")
-                self.chat_box.insert("end", f"--- Chat History with {target} ---\n")
-                for msg in history[-20:]:  # Show last 20 messages
+                self.chat_box.insert("end", f"=== Full Chat History with {target} ===\n")
+                # Show ALL messages with timestamps
+                for msg in history:
                     sender = msg.get('sender', 'Unknown')
                     text = msg.get('message', '')
-                    self.chat_box.insert("end", f"{sender}: {text}\n")
-                self.chat_box.insert("end", "--- New Messages ---\n")
-                self.chat_box.configure(state="disabled")
-                self.chat_box.see("end")
+                    timestamp = msg.get('timestamp', '')
+                    formatted_msg = get_formatted_message(sender, text, timestamp)
+                    self.chat_box.insert("end", f"{formatted_msg}\n")
+                self.chat_box.insert("end", "=== End of History ===\n\n")
+            else:
+                self.chat_box.insert("end", f"[No previous chat with {target}]\n\n")
+            
+            self.chat_box.configure(state="disabled")
+            self.chat_box.see("end")
             
             # Send call request to the target
             send_text_message("__CALL_REQUEST__", self.target_ip)
@@ -509,9 +517,13 @@ class HexChatApp(ctk.CTk):
         msg = self.msg_entry.get()
         if not msg: return
 
-        # Update own UI
+        # Update own UI with timestamp
+        from datetime import datetime
+        timestamp = datetime.now().isoformat()
+        formatted_msg = get_formatted_message("You", msg, timestamp)
+        
         self.chat_box.configure(state="normal")
-        self.chat_box.insert("end", f"You: {msg}\n")
+        self.chat_box.insert("end", f"{formatted_msg}\n")
         self.chat_box.configure(state="disabled")
         self.chat_box.see("end")
 
@@ -590,7 +602,10 @@ class HexChatApp(ctk.CTk):
                 self.disconnect()
         # Regular text message
         else:
-            self.chat_box.insert("end", f"Friend: {message}\n")
+            from datetime import datetime
+            timestamp = datetime.now().isoformat()
+            formatted_msg = get_formatted_message("Friend", message, timestamp)
+            self.chat_box.insert("end", f"{formatted_msg}\n")
             # Save incoming message to history
             if self.target_ip:
                 add_message(self.target_ip, "Friend", message)
@@ -606,11 +621,13 @@ class HexChatApp(ctk.CTk):
                 self.chat_box.configure(state="normal")
                 self.chat_box.insert("end", f"=== Chat History with {contact_ip} ===\n")
                 
-                # Show last 50 messages
+                # Show last 50 messages with timestamps
                 for msg in history[-50:]:
                     sender = msg.get('sender', 'Unknown')
                     text = msg.get('message', '')
-                    self.chat_box.insert("end", f"{sender}: {text}\n")
+                    timestamp = msg.get('timestamp', '')
+                    formatted_msg = get_formatted_message(sender, text, timestamp)
+                    self.chat_box.insert("end", f"{formatted_msg}\n")
                 
                 self.chat_box.insert("end", "=== End of History ===\n\n")
                 self.chat_box.configure(state="disabled")
