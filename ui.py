@@ -33,6 +33,7 @@ class HexChatApp(ctk.CTk):
         self.audio_interface = None
         self.input_stream = None
         self.output_stream = None
+        self.background_output_stream = None  # For background receiver
         self.target_ip = None
         self.is_muted = False
         self.is_deafened = False
@@ -174,8 +175,12 @@ class HexChatApp(ctk.CTk):
                 set_deafen_state(False)
                 
                 # Create a dummy output stream for the receiver
+                # This stream will be used when receiving audio during calls
                 temp_interface = get_audio_interface()
                 dummy_stream = open_output_stream(temp_interface, self.selected_output_device_index)
+                
+                # Store it as instance variable so it persists
+                self.background_output_stream = dummy_stream
                 
                 # Start the receive_audio loop (this will listen for both audio and text messages)
                 background_thread = threading.Thread(
@@ -275,6 +280,10 @@ class HexChatApp(ctk.CTk):
             self.target_ip = target
             self.call_state = "calling"
             
+            # Initialize audio interface for this call (will use later when call is accepted)
+            if not self.audio_interface:
+                self.audio_interface = get_audio_interface()
+            
             # Send call request to the target
             send_text_message("__CALL_REQUEST__", self.target_ip)
             
@@ -372,10 +381,12 @@ class HexChatApp(ctk.CTk):
             self.target_ip = caller_ip
             self.call_state = "connected"
             
-            # Initialize audio interface for this connection
+            # Initialize audio interface for sending audio
             self.audio_interface = get_audio_interface()
             self.input_stream = open_input_stream(self.audio_interface, self.selected_device_index)
-            self.output_stream = open_output_stream(self.audio_interface, self.selected_output_device_index)
+            
+            # Use the background output stream for receiving (already running)
+            self.output_stream = self.background_output_stream
             
             # Save connection to cache
             save_cache(caller_ip, self.selected_device_index, self.selected_output_device_index)
@@ -497,7 +508,14 @@ class HexChatApp(ctk.CTk):
                 
                 try:
                     # Now start sending audio since call was accepted
+                    # Use the audio interface for input stream
+                    if not self.audio_interface:
+                        self.audio_interface = get_audio_interface()
+                    
                     self.input_stream = open_input_stream(self.audio_interface, self.selected_device_index)
+                    # Use background output stream for receiving audio
+                    self.output_stream = self.background_output_stream
+                    
                     reset_noise_profile()
                     save_cache(self.target_ip, self.selected_device_index, self.selected_output_device_index)
                     
@@ -509,6 +527,8 @@ class HexChatApp(ctk.CTk):
                     self.sender_thread.start()
                 except Exception as e:
                     print(f"Error starting audio after call accept: {e}")
+                    import traceback
+                    traceback.print_exc()
         # Check for call rejection
         elif message == "__CALL_REJECT__":
             if self.call_state == "calling":
