@@ -174,18 +174,21 @@ class HexChatApp(ctk.CTk):
                 set_incoming_call_callback(self.show_incoming_call)
                 set_deafen_state(False)
                 
-                # Create a dummy output stream for the receiver
-                # This stream will be used when receiving audio during calls
-                temp_interface = get_audio_interface()
-                dummy_stream = open_output_stream(temp_interface, self.selected_output_device_index)
+                # Close old background stream if it exists
+                if self.background_output_stream:
+                    try:
+                        close_stream(self.background_output_stream)
+                    except Exception:
+                        pass
                 
-                # Store it as instance variable so it persists
-                self.background_output_stream = dummy_stream
+                # Create a fresh output stream for the receiver
+                temp_interface = get_audio_interface()
+                self.background_output_stream = open_output_stream(temp_interface, self.selected_output_device_index)
                 
                 # Start the receive_audio loop (this will listen for both audio and text messages)
                 background_thread = threading.Thread(
                     target=receive_audio,
-                    args=(dummy_stream,),
+                    args=(self.background_output_stream,),
                     daemon=True,
                     name="BackgroundReceiver"
                 )
@@ -305,6 +308,8 @@ class HexChatApp(ctk.CTk):
     def disconnect(self):
         """Disconnect from voice chat."""
         try:
+            import time
+            
             # Notify the other user before disconnecting
             if self.is_connected and self.target_ip:
                 try:
@@ -315,13 +320,16 @@ class HexChatApp(ctk.CTk):
             # Stop audio threads (only stop sender, not receiver)
             cleanup_sender()
             
-            # Close streams
+            # Give sender thread time to stop
+            time.sleep(0.2)
+            
+            # Close streams (but NOT background_output_stream)
             if self.input_stream:
                 close_stream(self.input_stream)
                 self.input_stream = None
-            if self.output_stream:
+            if self.output_stream and self.output_stream != self.background_output_stream:
                 close_stream(self.output_stream)
-                self.output_stream = None
+            self.output_stream = None
             
             # Close audio interface
             if self.audio_interface:
@@ -340,6 +348,7 @@ class HexChatApp(ctk.CTk):
             self.ip_entry.configure(state="normal")
             
             # Restart background receiver to listen for new calls
+            self.background_receiver_active = False  # Reset flag to allow restart
             self.start_background_receiver()
             
             print("✓ Disconnected from voice chat")
