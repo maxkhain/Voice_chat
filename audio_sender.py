@@ -6,6 +6,7 @@ import time
 import audioop
 from audio_config import CHUNK, PORT
 from audio_filter import apply_noise_cancellation
+from audio_encryption import encrypt_audio, encrypt_text, initialize_encryption
 
 # Socket for sending
 sock = None
@@ -48,7 +49,7 @@ def set_recv_queue_depth(depth):
 
 def send_text_message(message, target_ip):
     """
-    Send a text message to the target IP.
+    Send an encrypted text message to the target IP.
     
     Args:
         message: Text message to send
@@ -56,8 +57,9 @@ def send_text_message(message, target_ip):
     """
     try:
         sock = get_sender_socket()
-        # Prepend message type byte and encode text
-        packet = MESSAGE_TYPE_TEXT + message.encode('utf-8')
+        # Encrypt text and prepend message type byte
+        encrypted_msg = encrypt_text(message)
+        packet = MESSAGE_TYPE_TEXT + encrypted_msg
         sock.sendto(packet, (target_ip, PORT))
     except Exception as e:
         print(f"Error sending text message: {e}")
@@ -65,7 +67,7 @@ def send_text_message(message, target_ip):
 
 def send_audio(input_stream, output_stream, target_ip):
     """
-    Read microphone and send audio immediately for smooth, natural audio.
+    Read microphone, encrypt, and send audio immediately for smooth, natural audio.
     
     Args:
         input_stream: PyAudio input stream (microphone)
@@ -74,8 +76,11 @@ def send_audio(input_stream, output_stream, target_ip):
     """
     global _LAST_VISUAL, _SEND_QUEUE_DEPTH
     
-    print(f"\n🎤 Sending audio to {target_ip}...")
-    print(f"(Clean, unprocessed audio for smooth quality)")
+    # Initialize encryption
+    initialize_encryption()
+    
+    print(f"\n[SENDER] Sending encrypted audio to {target_ip}...")
+    print(f"(Encrypted for privacy)")
     
     sock = get_sender_socket()
     
@@ -87,9 +92,12 @@ def send_audio(input_stream, output_stream, target_ip):
             # Apply noise cancellation (disabled by default for smooth audio)
             data = apply_noise_cancellation(data)
             
+            # Encrypt audio data
+            encrypted_data = encrypt_audio(data)
+            
             # Prepend message type (audio) and send immediately
             try:
-                packet = MESSAGE_TYPE_AUDIO + data
+                packet = MESSAGE_TYPE_AUDIO + encrypted_data
                 sock.sendto(packet, (target_ip, PORT))
                 _SEND_QUEUE_DEPTH = 0
             except BlockingIOError:

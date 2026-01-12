@@ -6,6 +6,7 @@ import select
 import time
 from audio_config import CHUNK, PORT
 import audio_sender
+from audio_encryption import decrypt_audio, decrypt_text, initialize_encryption
 
 # Socket for receiving
 sock = None
@@ -58,13 +59,16 @@ def get_receiver_socket():
 
 def receive_audio(output_stream):
     """
-    Receive and play latest packet only; discard old ones if backlog exists.
-    Also handles text messages.
+    Receive and decrypt audio packets; discard old ones if backlog exists.
+    Also handles decryption of text messages.
     
     Args:
         output_stream: PyAudio output stream (speakers)
     """
     global _RECV_QUEUE_DEPTH
+    
+    # Initialize encryption
+    initialize_encryption()
     
     sock = get_receiver_socket()
     
@@ -87,16 +91,17 @@ def receive_audio(output_stream):
             msg_type = data[0:1]
             
             if msg_type == MESSAGE_TYPE_TEXT:
-                # Text message
+                # Encrypted text message - decrypt it
                 try:
-                    message = data[1:].decode('utf-8')
-                    if _text_message_callback:
+                    encrypted_msg = data[1:]
+                    message = decrypt_text(encrypted_msg)
+                    if message and _text_message_callback:
                         _text_message_callback(message)
                 except Exception as e:
                     pass
                 continue
             elif msg_type == MESSAGE_TYPE_AUDIO:
-                # Audio data - strip the message type byte
+                # Encrypted audio data - strip the message type byte
                 data = data[1:]
             else:
                 # Unknown message type or legacy audio (no type byte)
@@ -126,11 +131,14 @@ def receive_audio(output_stream):
             # Update sender's UI with queue depth
             audio_sender.set_recv_queue_depth(drained)
             
+            # Decrypt audio data
+            decrypted_data = decrypt_audio(latest_data)
+            
             # Play ONLY the latest packet (discard old ones)
             # But only if not deafened
-            if not _is_deafened:
+            if not _is_deafened and decrypted_data:
                 try:
-                    output_stream.write(latest_data)
+                    output_stream.write(decrypted_data)
                 except Exception as e:
                     # Overflow; skip this frame only
                     pass
