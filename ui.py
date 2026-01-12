@@ -20,6 +20,7 @@ from connection_cache import (
     has_cached_connection,
     save_cache,
 )
+from network_scanner import scan_network_async, format_device_list, extract_ip_from_formatted
 
 
 # --- APPEARANCE ---
@@ -93,6 +94,21 @@ class HexChatApp(ctk.CTk):
         
         # Populate output device list
         self.populate_output_devices(last_speaker)
+
+        # Network Scan Section
+        self.scan_label = ctk.CTkLabel(self.sidebar, text="Available PCs:", font=ctk.CTkFont(size=12))
+        self.scan_label.pack(pady=(15, 5), padx=10)
+        
+        self.scan_btn = ctk.CTkButton(self.sidebar, text="Scan Network", command=self.start_network_scan)
+        self.scan_btn.pack(pady=5, padx=10, fill="x")
+        
+        self.device_list = ctk.CTkComboBox(
+            self.sidebar,
+            values=[],
+            state="readonly",
+            command=self.on_device_selected_from_list
+        )
+        self.device_list.pack(pady=(0, 10), padx=10, fill="x")
 
         # IP Input with cached value
         self.ip_entry = ctk.CTkEntry(self.sidebar, placeholder_text="Enter Friend's IP")
@@ -344,6 +360,32 @@ class HexChatApp(ctk.CTk):
         
         self.chat_box.configure(state="disabled")
         self.chat_box.see("end")
+
+    def start_network_scan(self):
+        """Start scanning the network for available devices."""
+        self.scan_btn.configure(state="disabled", text="Scanning...")
+        self.device_list.configure(values=["Scanning..."], state="disabled")
+        
+        def on_scan_complete(devices):
+            """Callback when scan completes."""
+            if devices:
+                formatted_devices = format_device_list(devices)
+                self.device_list.configure(values=formatted_devices, state="readonly")
+                self.scan_btn.configure(state="normal", text=f"Scan Network ({len(devices)} found)")
+            else:
+                self.device_list.configure(values=["No devices found"], state="disabled")
+                self.scan_btn.configure(state="normal", text="Scan Network")
+        
+        # Scan network in background thread
+        scan_network_async(on_scan_complete)
+
+    def on_device_selected_from_list(self, choice):
+        """Handle device selection from network list."""
+        if choice and choice != "Scanning..." and choice != "No devices found":
+            ip = extract_ip_from_formatted(choice)
+            self.ip_entry.delete(0, "end")
+            self.ip_entry.insert(0, ip)
+            print(f"[OK] Selected device: {choice}")
 
 if __name__ == "__main__":
     app = HexChatApp()
