@@ -303,9 +303,8 @@ class HexChatApp(ctk.CTk):
                 except Exception:
                     pass
             
-            # Stop audio threads
+            # Stop audio threads (only stop sender, not receiver)
             cleanup_sender()
-            cleanup_receiver()
             
             # Close streams
             if self.input_stream:
@@ -330,6 +329,9 @@ class HexChatApp(ctk.CTk):
             self.connect_btn.configure(state="normal", text="Connect Voice/Chat")
             self.disconnect_btn.configure(state="disabled")
             self.ip_entry.configure(state="normal")
+            
+            # Restart background receiver to listen for new calls
+            self.start_background_receiver()
             
             print("✓ Disconnected from voice chat")
         except Exception as e:
@@ -422,8 +424,8 @@ class HexChatApp(ctk.CTk):
             # Send rejection
             send_text_message("__CALL_REJECT__", caller_ip)
             
-            # Clean up
-            cleanup_receiver()
+            # DO NOT cleanup the receiver - it's the background receiver!
+            # Just close our local output stream if we created one
             if self.output_stream:
                 close_stream(self.output_stream)
                 self.output_stream = None
@@ -440,6 +442,9 @@ class HexChatApp(ctk.CTk):
             self.chat_box.configure(state="normal")
             self.chat_box.insert("end", "--- Call rejected ---\n")
             self.chat_box.configure(state="disabled")
+            
+            # Restart background receiver to listen for new calls
+            self.start_background_receiver()
             
             print(f"✓ Call rejected from {caller_ip}")
         except Exception as e:
