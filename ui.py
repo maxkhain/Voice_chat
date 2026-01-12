@@ -21,6 +21,7 @@ from connection_cache import (
     save_cache,
 )
 from chat_history import add_message, load_history, display_history, clear_history, get_formatted_message, format_timestamp
+from network_scanner import scan_network_async, format_device_list, extract_ip_from_formatted
 
 
 # --- APPEARANCE ---
@@ -101,6 +102,21 @@ class HexChatApp(ctk.CTk):
         
         # Populate output device list
         self.populate_output_devices(last_speaker)
+
+        # Network Scan Section
+        self.scan_label = ctk.CTkLabel(self.sidebar, text="Available PCs:", font=ctk.CTkFont(size=12))
+        self.scan_label.pack(pady=(15, 5), padx=10)
+        
+        self.scan_btn = ctk.CTkButton(self.sidebar, text="Scan Network", command=self.start_network_scan)
+        self.scan_btn.pack(pady=5, padx=10, fill="x")
+        
+        self.device_list = ctk.CTkComboBox(
+            self.sidebar,
+            values=[],
+            state="readonly",
+            command=self.on_device_selected_from_list
+        )
+        self.device_list.pack(pady=(0, 10), padx=10, fill="x")
 
         # IP Input with cached value
         self.ip_entry = ctk.CTkEntry(self.sidebar, placeholder_text="Enter Friend's IP")
@@ -185,7 +201,7 @@ class HexChatApp(ctk.CTk):
                 reset_receiver_socket()
                 
                 # Set callbacks first
-                set_text_message_callback(self.receive_msg_update)
+                set_text_message_callback(self.receive_msg_update, self.receive_msg_update_with_sender)
                 set_incoming_call_callback(self.show_incoming_call)
                 set_deafen_state(False)
                 
@@ -290,6 +306,7 @@ class HexChatApp(ctk.CTk):
             print(f"Selected output device: {choice}")
 
     def connect(self):
+        """Initiate a voice call to the target IP."""
         target = self.ip_entry.get()
         if not target: 
             return
@@ -302,23 +319,14 @@ class HexChatApp(ctk.CTk):
             if not self.audio_interface:
                 self.audio_interface = get_audio_interface()
             
-            # Clear chat box and load full chat history with this contact
+            # Load chat history with this contact
             self.chat_box.configure(state="normal")
-            self.chat_box.delete("1.0", "end")
-            
             history = load_history(target)
             if history:
-                self.chat_box.insert("end", f"=== Full Chat History with {target} ===\n")
-                # Show ALL messages with timestamps
-                for msg in history:
-                    sender = msg.get('sender', 'Unknown')
-                    text = msg.get('message', '')
-                    timestamp = msg.get('timestamp', '')
-                    formatted_msg = get_formatted_message(sender, text, timestamp)
-                    self.chat_box.insert("end", f"{formatted_msg}\n")
-                self.chat_box.insert("end", "=== End of History ===\n\n")
+                # Append call status to existing history
+                self.chat_box.insert("end", f"\n[CALLING] {target}...\n")
             else:
-                self.chat_box.insert("end", f"[No previous chat with {target}]\n\n")
+                self.chat_box.insert("end", f"[CALLING] {target}...\n")
             
             self.chat_box.configure(state="disabled")
             self.chat_box.see("end")
@@ -326,9 +334,6 @@ class HexChatApp(ctk.CTk):
             # Send call request to the target
             send_text_message("__CALL_REQUEST__", self.target_ip)
             
-            self.chat_box.configure(state="normal")
-            self.chat_box.insert("end", f"[CALLING] {target}...\n")
-            self.chat_box.configure(state="disabled")
             self.connect_btn.configure(state="disabled", text="Calling...")
             self.cancel_call_btn.configure(state="normal")
             self.ip_entry.configure(state="disabled")
@@ -550,6 +555,14 @@ class HexChatApp(ctk.CTk):
     def send_msg(self, event=None):
         msg = self.msg_entry.get()
         if not msg: return
+        
+        # Check if we have a target IP (either from connection or direct selection)
+        target = self.target_ip or self.ip_entry.get()
+        if not target:
+            self.chat_box.configure(state="normal")
+            self.chat_box.insert("end", "[ERROR] Please select an IP first\n")
+            self.chat_box.configure(state="disabled")
+            return
 
         # Update own UI with timestamp
         from datetime import datetime
@@ -562,12 +575,10 @@ class HexChatApp(ctk.CTk):
         self.chat_box.see("end")
 
         # Save to history
-        if self.is_connected and self.target_ip:
-            add_message(self.target_ip, "You", msg)
+        add_message(target, "You", msg)
 
         # Send to network
-        if self.is_connected and self.target_ip:
-            send_text_message(msg, self.target_ip)
+        send_text_message(msg, target)
         
         self.msg_entry.delete(0, "end")
 
@@ -655,6 +666,34 @@ class HexChatApp(ctk.CTk):
         self.chat_box.configure(state="disabled")
         self.chat_box.see("end")
 
+    def receive_msg_update_with_sender(self, message, sender_ip):
+        """Handle message with sender IP - saves even without active call."""
+        self.chat_box.configure(state="normal")
+        
+        # Check for incoming call request
+        if message == "__CALL_REQUEST__":
+            # Call request with sender IP - handled by callback
+            pass
+        # Check for system messages
+        elif message in ["__CALL_ACCEPT__", "__CALL_REJECT__", "__CALL_CANCEL__", "__DISCONNECT__"]:
+            # These are already handled by receive_msg_update
+            self.receive_msg_update(message)
+            return
+        # Regular text message - save regardless of connection state
+        else:
+            from datetime import datetime
+            timestamp = datetime.now().isoformat()
+            formatted_msg = get_formatted_message("Friend", message, timestamp)
+            self.chat_box.insert("end", f"{formatted_msg}\n")
+            # Always save message to history using sender IP
+            add_message(sender_ip, "Friend", message)
+            # Update target IP if not set (for text-only conversations)
+            if not self.target_ip:
+                self.target_ip = sender_ip
+        
+        self.chat_box.configure(state="disabled")
+        self.chat_box.see("end")
+
     def load_previous_chat(self, contact_ip: str):
         """Load and display previous chat history with a contact."""
         try:
@@ -676,6 +715,53 @@ class HexChatApp(ctk.CTk):
                 self.chat_box.see("end")
         except Exception as e:
             print(f"[ERROR] Could not load previous chat: {e}")
+
+    def start_network_scan(self):
+        """Start scanning the network for available devices."""
+        self.scan_btn.configure(state="disabled", text="Scanning...")
+        self.device_list.configure(values=["Scanning..."], state="disabled")
+        
+        def on_scan_complete(devices):
+            """Callback when scan completes."""
+            if devices:
+                formatted_devices = format_device_list(devices)
+                self.device_list.configure(values=formatted_devices, state="readonly")
+                self.scan_btn.configure(state="normal", text=f"Scan Network ({len(devices)} found)")
+            else:
+                self.device_list.configure(values=["No devices found"], state="disabled")
+                self.scan_btn.configure(state="normal", text="Scan Network")
+        
+        # Scan network in background thread
+        scan_network_async(on_scan_complete)
+
+    def on_device_selected_from_list(self, choice):
+        """Handle device selection from network list."""
+        if choice and choice != "Scanning..." and choice != "No devices found":
+            ip = extract_ip_from_formatted(choice)
+            self.ip_entry.delete(0, "end")
+            self.ip_entry.insert(0, ip)
+            
+            # Load chat history for this IP
+            self.chat_box.configure(state="normal")
+            self.chat_box.delete("1.0", "end")
+            
+            history = load_history(ip)
+            if history:
+                self.chat_box.insert("end", f"=== Chat History with {ip} ===\n")
+                for msg in history:
+                    sender = msg.get('sender', 'Unknown')
+                    text = msg.get('message', '')
+                    timestamp = msg.get('timestamp', '')
+                    formatted_msg = get_formatted_message(sender, text, timestamp)
+                    self.chat_box.insert("end", f"{formatted_msg}\n")
+                self.chat_box.insert("end", "=== End of History ===\n\n")
+            else:
+                self.chat_box.insert("end", f"[New chat with {ip}]\n\n")
+            
+            self.chat_box.configure(state="disabled")
+            self.chat_box.see("end")
+            
+            print(f"[OK] Selected device: {choice}")
 
 if __name__ == "__main__":
     app = HexChatApp()
