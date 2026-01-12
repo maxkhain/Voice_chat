@@ -104,6 +104,10 @@ class HexChatApp(ctk.CTk):
         self.connect_btn = ctk.CTkButton(self.sidebar, text="Connect Voice/Chat", command=self.connect)
         self.connect_btn.pack(pady=10, padx=10, fill="x")
 
+        # Disconnect Button
+        self.disconnect_btn = ctk.CTkButton(self.sidebar, text="Disconnect", command=self.disconnect, state="disabled")
+        self.disconnect_btn.pack(pady=10, padx=10, fill="x")
+
         # Voice Controls
         self.mute_btn = ctk.CTkSwitch(self.sidebar, text="Mute Mic", command=self.toggle_mute)
         self.mute_btn.pack(pady=20, padx=10)
@@ -250,12 +254,56 @@ class HexChatApp(ctk.CTk):
             self.chat_box.insert("end", f"--- Connected to {target} ---\n")
             self.chat_box.configure(state="disabled")
             self.connect_btn.configure(state="disabled", text="Connected!")
+            self.disconnect_btn.configure(state="normal")
             self.ip_entry.configure(state="disabled")
         except Exception as e:
             self.chat_box.configure(state="normal")
             self.chat_box.insert("end", f"Error: {str(e)}\n")
             self.chat_box.configure(state="disabled")
             print(f"Connection error: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def disconnect(self):
+        """Disconnect from voice chat."""
+        try:
+            # Notify the other user before disconnecting
+            if self.is_connected and self.target_ip:
+                try:
+                    send_text_message("__DISCONNECT__", self.target_ip)
+                except Exception:
+                    pass
+            
+            # Stop audio threads
+            cleanup_sender()
+            cleanup_receiver()
+            
+            # Close streams
+            if self.input_stream:
+                close_stream(self.input_stream)
+                self.input_stream = None
+            if self.output_stream:
+                close_stream(self.output_stream)
+                self.output_stream = None
+            
+            # Close audio interface
+            if self.audio_interface:
+                close_audio_interface(self.audio_interface)
+                self.audio_interface = None
+            
+            # Update UI
+            self.is_connected = False
+            self.target_ip = None
+            self.chat_box.configure(state="normal")
+            self.chat_box.insert("end", "--- Disconnected ---\n")
+            self.chat_box.configure(state="disabled")
+            self.connect_btn.configure(state="normal", text="Connect Voice/Chat")
+            self.disconnect_btn.configure(state="disabled")
+            self.ip_entry.configure(state="normal")
+            
+            print("✓ Disconnected from voice chat")
+        except Exception as e:
+            print(f"Disconnect error: {e}")
             import traceback
             traceback.print_exc()
 
@@ -287,7 +335,13 @@ class HexChatApp(ctk.CTk):
     def receive_msg_update(self, message):
         # This function is called when a message arrives
         self.chat_box.configure(state="normal")
-        self.chat_box.insert("end", f"Friend: {message}\n")
+        
+        # Check for disconnect notification
+        if message == "__DISCONNECT__":
+            self.chat_box.insert("end", "--- Friend disconnected ---\n")
+        else:
+            self.chat_box.insert("end", f"Friend: {message}\n")
+        
         self.chat_box.configure(state="disabled")
         self.chat_box.see("end")
 
