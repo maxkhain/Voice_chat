@@ -116,6 +116,10 @@ class HexChatApp(ctk.CTk):
         self.disconnect_btn = ctk.CTkButton(self.sidebar, text="Disconnect", command=self.disconnect, state="disabled")
         self.disconnect_btn.pack(pady=10, padx=10, fill="x")
 
+        # Cancel Call Button (hidden by default)
+        self.cancel_call_btn = ctk.CTkButton(self.sidebar, text="Cancel Call", command=self.cancel_call, state="disabled")
+        self.cancel_call_btn.pack(pady=10, padx=10, fill="x")
+
         # Incoming Call Frame (hidden by default)
         self.call_frame = ctk.CTkFrame(self.sidebar)
         self.call_frame.pack(pady=10, padx=10, fill="x")
@@ -326,6 +330,7 @@ class HexChatApp(ctk.CTk):
             self.chat_box.insert("end", f"[CALLING] {target}...\n")
             self.chat_box.configure(state="disabled")
             self.connect_btn.configure(state="disabled", text="Calling...")
+            self.cancel_call_btn.configure(state="normal")
             self.ip_entry.configure(state="disabled")
             
             print(f"[CALLING] {target}...")
@@ -409,6 +414,35 @@ class HexChatApp(ctk.CTk):
                 print(f"📞 Incoming call from {caller_ip}")
         except Exception as e:
             print(f"Error showing incoming call: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def cancel_call(self):
+        """Cancel outgoing call request."""
+        try:
+            if self.call_state != "calling":
+                return
+            
+            target_ip = self.target_ip
+            
+            # Send cancellation message
+            send_text_message("__CALL_CANCEL__", target_ip)
+            
+            # Reset state
+            self.call_state = "idle"
+            self.target_ip = None
+            
+            # Update UI
+            self.chat_box.configure(state="normal")
+            self.chat_box.insert("end", "--- Call cancelled ---\n")
+            self.chat_box.configure(state="disabled")
+            self.connect_btn.configure(state="normal", text="Connect Voice/Chat")
+            self.cancel_call_btn.configure(state="disabled")
+            self.ip_entry.configure(state="normal")
+            
+            print(f"✓ Call to {target_ip} cancelled")
+        except Exception as e:
+            print(f"Error cancelling call: {e}")
             import traceback
             traceback.print_exc()
 
@@ -584,6 +618,7 @@ class HexChatApp(ctk.CTk):
                 self.call_state = "idle"
                 self.chat_box.insert("end", "--- Call rejected ---\n")
                 self.connect_btn.configure(state="normal", text="Connect Voice/Chat")
+                self.cancel_call_btn.configure(state="disabled")
                 self.ip_entry.configure(state="normal")
                 
                 # Clean up
@@ -594,6 +629,13 @@ class HexChatApp(ctk.CTk):
                 if self.audio_interface:
                     close_audio_interface(self.audio_interface)
                     self.audio_interface = None
+        # Check for call cancellation
+        elif message == "__CALL_CANCEL__":
+            if self.call_state == "ringing":
+                self.call_state = "idle"
+                self.chat_box.insert("end", "--- Call cancelled by friend ---\n")
+                self.call_frame.pack_forget()
+                self.incoming_call_ip = None
         # Check for disconnection
         elif message == "__DISCONNECT__":
             self.chat_box.insert("end", "--- Friend disconnected ---\n")
