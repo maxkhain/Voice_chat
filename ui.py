@@ -173,14 +173,16 @@ class HexChatApp(ctk.CTk):
                 set_incoming_call_callback(self.show_incoming_call)
                 set_deafen_state(False)
                 
-                # Create persistent receiver resources
-                from audio_receiver import initialize_receiver_socket, get_receiver_socket
-                sock = get_receiver_socket()  # Initialize the global socket
+                # Create a dummy output stream for the receiver
+                temp_interface = get_audio_interface()
+                dummy_stream = open_output_stream(temp_interface, self.selected_output_device_index)
                 
-                # Start background receiver thread
+                # Start the receive_audio loop (this will listen for both audio and text messages)
                 background_thread = threading.Thread(
-                    target=self.background_receive_loop,
-                    daemon=True
+                    target=receive_audio,
+                    args=(dummy_stream,),
+                    daemon=True,
+                    name="BackgroundReceiver"
                 )
                 background_thread.start()
                 self.background_receiver_active = True
@@ -189,54 +191,6 @@ class HexChatApp(ctk.CTk):
             print(f"Error starting background receiver: {e}")
             import traceback
             traceback.print_exc()
-
-    def background_receive_loop(self):
-        """Background loop to listen for incoming messages and calls."""
-        from audio_receiver import get_receiver_socket
-        import socket as socket_module
-        import select
-        import time
-        
-        sock = get_receiver_socket()
-        
-        while True:
-            try:
-                # Use select to check for incoming data
-                ready = select.select([sock], [], [], 0.1)
-                if not ready[0]:
-                    time.sleep(0.01)
-                    continue
-                
-                # Receive data
-                data, addr = sock.recvfrom(4096)
-                
-                if not data:
-                    continue
-                
-                # Check message type
-                msg_type = data[0:1]
-                
-                # MESSAGE_TYPE_TEXT = b'\x01'
-                if msg_type == b'\x01':
-                    try:
-                        message = data[1:].decode('utf-8')
-                        print(f"[DEBUG] Received message from {addr[0]}: {message}")
-                        
-                        # Call the callback
-                        if message == "__CALL_REQUEST__":
-                            print(f"[DEBUG] Call request detected from {addr[0]}")
-                            self.show_incoming_call("__CALL_REQUEST__", addr[0])
-                        else:
-                            self.receive_msg_update(message)
-                    except Exception as e:
-                        print(f"[DEBUG] Error decoding message: {e}")
-                        pass
-            except socket_module.error as e:
-                if "Errno 10054" not in str(e):
-                    time.sleep(0.1)
-            except Exception as e:
-                print(f"[DEBUG] Background receiver error: {e}")
-                time.sleep(0.1)
 
     def populate_devices(self, cached_device_id=None):
         """Populate the device combobox with available input devices."""

@@ -100,15 +100,22 @@ def receive_audio(output_stream):
             msg_type = data[0:1]
             
             if msg_type == MESSAGE_TYPE_TEXT:
-                # Text message
+                # Text message - needs to be decrypted first
                 try:
-                    message = data[1:].decode('utf-8')
+                    encrypted_msg = data[1:]
+                    message = decrypt_text(encrypted_msg)
+                    print(f"[RX] Text from {addr[0]}: {message}")
                     # Check if it's a call request
                     if message == "__CALL_REQUEST__" and _incoming_call_callback:
+                        print(f"[RX] Calling incoming_call_callback with {addr[0]}")
                         _incoming_call_callback(message, addr[0])
                     elif _text_message_callback:
+                        print(f"[RX] Calling text_message_callback")
                         _text_message_callback(message)
                 except Exception as e:
+                    print(f"[RX] Error processing text: {e}")
+                    import traceback
+                    traceback.print_exc()
                     pass
                 continue
             elif msg_type == MESSAGE_TYPE_AUDIO:
