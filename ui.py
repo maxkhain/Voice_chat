@@ -11,7 +11,7 @@ from audio_io import (
     close_audio_interface
 )
 from audio_sender import send_audio, cleanup_sender, send_text_message
-from audio_receiver import receive_audio, cleanup_receiver, set_text_message_callback, set_deafen_state, set_deafen_state, set_incoming_call_callback
+from audio_receiver import receive_audio, cleanup_receiver, set_text_message_callback, set_deafen_state, set_deafen_state, set_incoming_call_callback, reset_receiver_socket
 from audio_filter import reset_noise_profile
 from connection_cache import (
     get_last_connection,
@@ -169,6 +169,9 @@ class HexChatApp(ctk.CTk):
         """Start a background receiver thread to listen for incoming calls."""
         try:
             if not self.background_receiver_active:
+                # Reset the receiver socket to clear any stale state
+                reset_receiver_socket()
+                
                 # Set callbacks first
                 set_text_message_callback(self.receive_msg_update)
                 set_incoming_call_callback(self.show_incoming_call)
