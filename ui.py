@@ -20,6 +20,7 @@ from connection_cache import (
     has_cached_connection,
     save_cache,
 )
+from chat_history import add_message, load_history, display_history, clear_history
 
 
 # --- APPEARANCE ---
@@ -50,6 +51,9 @@ class HexChatApp(ctk.CTk):
         last_ip = get_last_connection()
         last_mic = get_last_microphone()
         last_speaker = get_last_speaker()
+        
+        # Store last IP for later use
+        self.last_loaded_ip = last_ip
         
         # Window Setup
         self.title("HexChat")
@@ -149,6 +153,10 @@ class HexChatApp(ctk.CTk):
         # Chat History box
         self.chat_box = ctk.CTkTextbox(self.chat_frame, state="disabled")
         self.chat_box.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
+        
+        # Auto-load previous chat history if available
+        if last_ip:
+            self.load_previous_chat(last_ip)
 
         # Message Input
         self.entry_frame = ctk.CTkFrame(self.chat_frame, fg_color="transparent")
@@ -287,16 +295,29 @@ class HexChatApp(ctk.CTk):
             if not self.audio_interface:
                 self.audio_interface = get_audio_interface()
             
+            # Load previous chat history with this contact
+            history = load_history(target)
+            if history:
+                self.chat_box.configure(state="normal")
+                self.chat_box.insert("end", f"--- Chat History with {target} ---\n")
+                for msg in history[-20:]:  # Show last 20 messages
+                    sender = msg.get('sender', 'Unknown')
+                    text = msg.get('message', '')
+                    self.chat_box.insert("end", f"{sender}: {text}\n")
+                self.chat_box.insert("end", "--- New Messages ---\n")
+                self.chat_box.configure(state="disabled")
+                self.chat_box.see("end")
+            
             # Send call request to the target
             send_text_message("__CALL_REQUEST__", self.target_ip)
             
             self.chat_box.configure(state="normal")
-            self.chat_box.insert("end", f"📞 Calling {target}...\n")
+            self.chat_box.insert("end", f"[CALLING] {target}...\n")
             self.chat_box.configure(state="disabled")
             self.connect_btn.configure(state="disabled", text="Calling...")
             self.ip_entry.configure(state="disabled")
             
-            print(f"📞 Calling {target}...")
+            print(f"[CALLING] {target}...")
         except Exception as e:
             self.chat_box.configure(state="normal")
             self.chat_box.insert("end", f"Error: {str(e)}\n")
@@ -491,6 +512,10 @@ class HexChatApp(ctk.CTk):
         self.chat_box.configure(state="disabled")
         self.chat_box.see("end")
 
+        # Save to history
+        if self.is_connected and self.target_ip:
+            add_message(self.target_ip, "You", msg)
+
         # Send to network
         if self.is_connected and self.target_ip:
             send_text_message(msg, self.target_ip)
@@ -560,9 +585,32 @@ class HexChatApp(ctk.CTk):
         # Regular text message
         else:
             self.chat_box.insert("end", f"Friend: {message}\n")
+            # Save incoming message to history
+            if self.target_ip:
+                add_message(self.target_ip, "Friend", message)
         
         self.chat_box.configure(state="disabled")
         self.chat_box.see("end")
+
+    def load_previous_chat(self, contact_ip: str):
+        """Load and display previous chat history with a contact."""
+        try:
+            history = load_history(contact_ip)
+            if history:
+                self.chat_box.configure(state="normal")
+                self.chat_box.insert("end", f"=== Chat History with {contact_ip} ===\n")
+                
+                # Show last 50 messages
+                for msg in history[-50:]:
+                    sender = msg.get('sender', 'Unknown')
+                    text = msg.get('message', '')
+                    self.chat_box.insert("end", f"{sender}: {text}\n")
+                
+                self.chat_box.insert("end", "=== End of History ===\n\n")
+                self.chat_box.configure(state="disabled")
+                self.chat_box.see("end")
+        except Exception as e:
+            print(f"[ERROR] Could not load previous chat: {e}")
 
 if __name__ == "__main__":
     app = HexChatApp()
