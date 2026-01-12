@@ -3,6 +3,12 @@
 ## Features to Implement
 
 ### High Priority
+- [ ] Auto-accept calls when both sides initiate
+  - Detect simultaneous call requests
+  - Automatically establish connection
+  - Notify user of automatic acceptance
+  - Option to disable auto-accept
+
 - [ ] Add sound effects
   - Message received sound
   - Connection/disconnect sounds
