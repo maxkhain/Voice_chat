@@ -20,6 +20,9 @@ MESSAGE_TYPE_TEXT = b'\x01'
 # Callback for receiving text messages
 _text_message_callback = None
 
+# Callback for incoming call requests
+_incoming_call_callback = None
+
 # Audio state
 _is_deafened = False
 
@@ -28,6 +31,12 @@ def set_text_message_callback(callback):
     """Set the callback function to be called when a text message is received."""
     global _text_message_callback
     _text_message_callback = callback
+
+
+def set_incoming_call_callback(callback):
+    """Set the callback function to be called when a call request is received."""
+    global _incoming_call_callback
+    _incoming_call_callback = callback
 
 
 def set_deafen_state(is_deafened):
@@ -78,7 +87,7 @@ def receive_audio(output_stream):
                 continue
             
             # Receive the first packet
-            data, _ = sock.recvfrom(CHUNK * 4)
+            data, addr = sock.recvfrom(CHUNK * 4)
             
             # Check message type (first byte)
             if not data:
@@ -90,7 +99,10 @@ def receive_audio(output_stream):
                 # Text message
                 try:
                     message = data[1:].decode('utf-8')
-                    if _text_message_callback:
+                    # Check if it's a call request
+                    if message == "__CALL_REQUEST__" and _incoming_call_callback:
+                        _incoming_call_callback(message, addr[0])
+                    elif _text_message_callback:
                         _text_message_callback(message)
                 except Exception as e:
                     pass

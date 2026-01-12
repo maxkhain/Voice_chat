@@ -11,7 +11,7 @@ from audio_io import (
     close_audio_interface
 )
 from audio_sender import send_audio, cleanup_sender, send_text_message
-from audio_receiver import receive_audio, cleanup_receiver, set_text_message_callback, set_deafen_state, set_deafen_state
+from audio_receiver import receive_audio, cleanup_receiver, set_text_message_callback, set_deafen_state, set_deafen_state, set_incoming_call_callback
 from audio_filter import reset_noise_profile
 from connection_cache import (
     get_last_connection,
@@ -41,6 +41,8 @@ class HexChatApp(ctk.CTk):
         self.is_connected = False
         self.selected_device_index = 0
         self.selected_output_device_index = None  # Use default if None
+        self.incoming_call_ip = None  # Track incoming call request
+        self.call_state = "idle"  # idle, calling, ringing, connected
         
         # Load cached values
         last_ip = get_last_connection()
@@ -107,6 +109,26 @@ class HexChatApp(ctk.CTk):
         # Disconnect Button
         self.disconnect_btn = ctk.CTkButton(self.sidebar, text="Disconnect", command=self.disconnect, state="disabled")
         self.disconnect_btn.pack(pady=10, padx=10, fill="x")
+
+        # Incoming Call Frame (hidden by default)
+        self.call_frame = ctk.CTkFrame(self.sidebar)
+        self.call_frame.pack(pady=10, padx=10, fill="x")
+        self.call_frame.pack_forget()  # Hide initially
+
+        self.call_label = ctk.CTkLabel(self.call_frame, text="📞 Incoming Call", font=ctk.CTkFont(size=12, weight="bold"))
+        self.call_label.pack(pady=5)
+
+        self.call_info_label = ctk.CTkLabel(self.call_frame, text="", font=ctk.CTkFont(size=10), wraplength=180)
+        self.call_info_label.pack(pady=5)
+
+        self.call_buttons_frame = ctk.CTkFrame(self.call_frame)
+        self.call_buttons_frame.pack(pady=5, fill="x")
+
+        self.accept_btn = ctk.CTkButton(self.call_buttons_frame, text="Accept", command=self.accept_call, width=80)
+        self.accept_btn.pack(side="left", padx=5)
+
+        self.reject_btn = ctk.CTkButton(self.call_buttons_frame, text="Reject", command=self.reject_call, width=80)
+        self.reject_btn.pack(side="right", padx=5)
 
         # Voice Controls
         self.mute_btn = ctk.CTkSwitch(self.sidebar, text="Mute Mic", command=self.toggle_mute)
@@ -219,43 +241,36 @@ class HexChatApp(ctk.CTk):
         
         try:
             self.target_ip = target
+            self.call_state = "calling"
+            
+            # Initialize receiver to listen for responses
             self.audio_interface = get_audio_interface()
-            self.input_stream = open_input_stream(self.audio_interface, self.selected_device_index)
             self.output_stream = open_output_stream(self.audio_interface, self.selected_output_device_index)
             
-            # Save connection to cache
-            save_cache(target, self.selected_device_index, self.selected_output_device_index)
-            
-            reset_noise_profile()
-            
-            # Set up text message callback and sync deafen state
-            set_text_message_callback(self.receive_msg_update)
-            set_deafen_state(self.is_deafened)
-            
-            # Start receiver thread (listens for incoming audio)
+            # Start receiver thread to listen for call response
             self.receiver_thread = threading.Thread(
                 target=receive_audio,
                 args=(self.output_stream,),
                 daemon=True
             )
             
-            # Start sender thread (sends microphone to target)
-            self.sender_thread = threading.Thread(
-                target=send_audio,
-                args=(self.input_stream, self.output_stream, self.target_ip),
-                daemon=True
-            )
+            # Set up text message callback for call responses
+            set_text_message_callback(self.receive_msg_update)
+            set_incoming_call_callback(self.show_incoming_call)
+            set_deafen_state(self.is_deafened)
             
             self.receiver_thread.start()
-            self.sender_thread.start()
             
-            self.is_connected = True
+            # Send call request to the target
+            send_text_message("__CALL_REQUEST__", self.target_ip)
+            
             self.chat_box.configure(state="normal")
-            self.chat_box.insert("end", f"--- Connected to {target} ---\n")
+            self.chat_box.insert("end", f"📞 Calling {target}...\n")
             self.chat_box.configure(state="disabled")
-            self.connect_btn.configure(state="disabled", text="Connected!")
-            self.disconnect_btn.configure(state="normal")
+            self.connect_btn.configure(state="disabled", text="Calling...")
             self.ip_entry.configure(state="disabled")
+            
+            print(f"📞 Calling {target}...")
         except Exception as e:
             self.chat_box.configure(state="normal")
             self.chat_box.insert("end", f"Error: {str(e)}\n")
@@ -293,6 +308,7 @@ class HexChatApp(ctk.CTk):
             
             # Update UI
             self.is_connected = False
+            self.call_state = "idle"
             self.target_ip = None
             self.chat_box.configure(state="normal")
             self.chat_box.insert("end", "--- Disconnected ---\n")
@@ -304,6 +320,126 @@ class HexChatApp(ctk.CTk):
             print("✓ Disconnected from voice chat")
         except Exception as e:
             print(f"Disconnect error: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def show_incoming_call(self, message, caller_ip):
+        """Show incoming call notification."""
+        try:
+            if message == "__CALL_REQUEST__":
+                self.incoming_call_ip = caller_ip
+                self.call_state = "ringing"
+                
+                # Initialize audio interface if not already done
+                if not self.audio_interface:
+                    self.audio_interface = get_audio_interface()
+                    self.output_stream = open_output_stream(self.audio_interface, self.selected_output_device_index)
+                    
+                    # Start receiver thread to listen
+                    self.receiver_thread = threading.Thread(
+                        target=receive_audio,
+                        args=(self.output_stream,),
+                        daemon=True
+                    )
+                    self.receiver_thread.start()
+                
+                # Update UI to show incoming call
+                self.call_info_label.configure(text=f"From: {caller_ip}")
+                self.call_frame.pack(pady=10, padx=10, fill="x")
+                
+                # Add to chat
+                self.chat_box.configure(state="normal")
+                self.chat_box.insert("end", f"📞 Incoming call from {caller_ip}\n")
+                self.chat_box.configure(state="disabled")
+                self.chat_box.see("end")
+                
+                print(f"📞 Incoming call from {caller_ip}")
+        except Exception as e:
+            print(f"Error showing incoming call: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def accept_call(self):
+        """Accept incoming call request."""
+        try:
+            if not self.incoming_call_ip:
+                return
+            
+            caller_ip = self.incoming_call_ip
+            self.target_ip = caller_ip
+            self.call_state = "connected"
+            
+            # Open input stream for microphone
+            self.input_stream = open_input_stream(self.audio_interface, self.selected_device_index)
+            
+            # Save connection to cache
+            save_cache(caller_ip, self.selected_device_index, self.selected_output_device_index)
+            
+            reset_noise_profile()
+            
+            # Start sender thread (sends microphone to caller)
+            self.sender_thread = threading.Thread(
+                target=send_audio,
+                args=(self.input_stream, self.output_stream, self.target_ip),
+                daemon=True
+            )
+            
+            self.sender_thread.start()
+            
+            # Send call acceptance
+            send_text_message("__CALL_ACCEPT__", self.target_ip)
+            
+            # Hide call notification UI
+            self.call_frame.pack_forget()
+            self.incoming_call_ip = None
+            
+            # Update UI
+            self.is_connected = True
+            self.chat_box.configure(state="normal")
+            self.chat_box.insert("end", f"--- Call accepted with {caller_ip} ---\n")
+            self.chat_box.configure(state="disabled")
+            self.connect_btn.configure(state="disabled", text="Connected!")
+            self.disconnect_btn.configure(state="normal")
+            
+            print(f"✓ Call accepted from {caller_ip}")
+        except Exception as e:
+            print(f"Error accepting call: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def reject_call(self):
+        """Reject incoming call request."""
+        try:
+            if not self.incoming_call_ip:
+                return
+            
+            caller_ip = self.incoming_call_ip
+            
+            # Send rejection
+            send_text_message("__CALL_REJECT__", caller_ip)
+            
+            # Clean up
+            cleanup_receiver()
+            if self.output_stream:
+                close_stream(self.output_stream)
+                self.output_stream = None
+            if self.audio_interface:
+                close_audio_interface(self.audio_interface)
+                self.audio_interface = None
+            
+            # Hide call notification UI
+            self.call_frame.pack_forget()
+            self.incoming_call_ip = None
+            self.call_state = "idle"
+            
+            # Update chat
+            self.chat_box.configure(state="normal")
+            self.chat_box.insert("end", "--- Call rejected ---\n")
+            self.chat_box.configure(state="disabled")
+            
+            print(f"✓ Call rejected from {caller_ip}")
+        except Exception as e:
+            print(f"Error rejecting call: {e}")
             import traceback
             traceback.print_exc()
 
@@ -336,9 +472,54 @@ class HexChatApp(ctk.CTk):
         # This function is called when a message arrives
         self.chat_box.configure(state="normal")
         
-        # Check for disconnect notification
-        if message == "__DISCONNECT__":
+        # Check for incoming call request
+        if message == "__CALL_REQUEST__":
+            # Extract IP from the message metadata (we'll handle this in receive_audio)
+            # For now, we'll need to pass the IP through a different mechanism
+            pass
+        # Check for call acceptance
+        elif message == "__CALL_ACCEPT__":
+            if self.call_state == "calling":
+                self.call_state = "connected"
+                self.is_connected = True
+                self.chat_box.insert("end", f"--- Connected to {self.target_ip} ---\n")
+                self.connect_btn.configure(state="disabled", text="Connected!")
+                self.disconnect_btn.configure(state="normal")
+                
+                try:
+                    # Now start sending audio since call was accepted
+                    self.input_stream = open_input_stream(self.audio_interface, self.selected_device_index)
+                    reset_noise_profile()
+                    save_cache(self.target_ip, self.selected_device_index, self.selected_output_device_index)
+                    
+                    self.sender_thread = threading.Thread(
+                        target=send_audio,
+                        args=(self.input_stream, self.output_stream, self.target_ip),
+                        daemon=True
+                    )
+                    self.sender_thread.start()
+                except Exception as e:
+                    print(f"Error starting audio after call accept: {e}")
+        # Check for call rejection
+        elif message == "__CALL_REJECT__":
+            if self.call_state == "calling":
+                self.call_state = "idle"
+                self.chat_box.insert("end", "--- Call rejected ---\n")
+                self.connect_btn.configure(state="normal", text="Connect Voice/Chat")
+                self.ip_entry.configure(state="normal")
+                
+                # Clean up
+                cleanup_receiver()
+                if self.output_stream:
+                    close_stream(self.output_stream)
+                    self.output_stream = None
+                if self.audio_interface:
+                    close_audio_interface(self.audio_interface)
+                    self.audio_interface = None
+        # Check for disconnection
+        elif message == "__DISCONNECT__":
             self.chat_box.insert("end", "--- Friend disconnected ---\n")
+        # Regular text message
         else:
             self.chat_box.insert("end", f"Friend: {message}\n")
         
