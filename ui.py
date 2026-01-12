@@ -43,6 +43,7 @@ class HexChatApp(ctk.CTk):
         self.selected_output_device_index = None  # Use default if None
         self.incoming_call_ip = None  # Track incoming call request
         self.call_state = "idle"  # idle, calling, ringing, connected
+        self.background_receiver_active = False  # Track background receiver
         
         # Load cached values
         last_ip = get_last_connection()
@@ -160,6 +161,32 @@ class HexChatApp(ctk.CTk):
         self.send_btn = ctk.CTkButton(self.entry_frame, text="Send", width=60, command=self.send_msg)
         self.send_btn.pack(side="right")
 
+        # Start background receiver to listen for incoming calls
+        self.start_background_receiver()
+
+    def start_background_receiver(self):
+        """Start a background receiver thread to listen for incoming calls."""
+        try:
+            if not self.background_receiver_active:
+                temp_interface = get_audio_interface()
+                temp_output_stream = open_output_stream(temp_interface, self.selected_output_device_index)
+                
+                # Set callbacks before starting receiver
+                set_text_message_callback(self.receive_msg_update)
+                set_incoming_call_callback(self.show_incoming_call)
+                
+                # Start background receiver thread
+                background_thread = threading.Thread(
+                    target=receive_audio,
+                    args=(temp_output_stream,),
+                    daemon=True
+                )
+                background_thread.start()
+                self.background_receiver_active = True
+                print("🔊 Background receiver started (listening for calls)")
+        except Exception as e:
+            print(f"Error starting background receiver: {e}")
+
     def populate_devices(self, cached_device_id=None):
         """Populate the device combobox with available input devices."""
         try:
@@ -243,24 +270,6 @@ class HexChatApp(ctk.CTk):
             self.target_ip = target
             self.call_state = "calling"
             
-            # Initialize receiver to listen for responses
-            self.audio_interface = get_audio_interface()
-            self.output_stream = open_output_stream(self.audio_interface, self.selected_output_device_index)
-            
-            # Start receiver thread to listen for call response
-            self.receiver_thread = threading.Thread(
-                target=receive_audio,
-                args=(self.output_stream,),
-                daemon=True
-            )
-            
-            # Set up text message callback for call responses
-            set_text_message_callback(self.receive_msg_update)
-            set_incoming_call_callback(self.show_incoming_call)
-            set_deafen_state(self.is_deafened)
-            
-            self.receiver_thread.start()
-            
             # Send call request to the target
             send_text_message("__CALL_REQUEST__", self.target_ip)
             
@@ -330,19 +339,6 @@ class HexChatApp(ctk.CTk):
                 self.incoming_call_ip = caller_ip
                 self.call_state = "ringing"
                 
-                # Initialize audio interface if not already done
-                if not self.audio_interface:
-                    self.audio_interface = get_audio_interface()
-                    self.output_stream = open_output_stream(self.audio_interface, self.selected_output_device_index)
-                    
-                    # Start receiver thread to listen
-                    self.receiver_thread = threading.Thread(
-                        target=receive_audio,
-                        args=(self.output_stream,),
-                        daemon=True
-                    )
-                    self.receiver_thread.start()
-                
                 # Update UI to show incoming call
                 self.call_info_label.configure(text=f"From: {caller_ip}")
                 self.call_frame.pack(pady=10, padx=10, fill="x")
@@ -369,13 +365,16 @@ class HexChatApp(ctk.CTk):
             self.target_ip = caller_ip
             self.call_state = "connected"
             
-            # Open input stream for microphone
+            # Initialize audio interface for this connection
+            self.audio_interface = get_audio_interface()
             self.input_stream = open_input_stream(self.audio_interface, self.selected_device_index)
+            self.output_stream = open_output_stream(self.audio_interface, self.selected_output_device_index)
             
             # Save connection to cache
             save_cache(caller_ip, self.selected_device_index, self.selected_output_device_index)
             
             reset_noise_profile()
+            set_deafen_state(self.is_deafened)
             
             # Start sender thread (sends microphone to caller)
             self.sender_thread = threading.Thread(
