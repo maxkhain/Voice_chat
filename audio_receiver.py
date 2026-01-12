@@ -100,11 +100,8 @@ def receive_audio(output_stream):
             msg_type = data[0:1]
             
             if msg_type == MESSAGE_TYPE_TEXT:
-                # Encrypted text message - decrypt it
+                # Text message
                 try:
-                    encrypted_msg = data[1:]
-                    message = decrypt_text(encrypted_msg)
-                    if message and _text_message_callback:
                     message = data[1:].decode('utf-8')
                     # Check if it's a call request
                     if message == "__CALL_REQUEST__" and _incoming_call_callback:
@@ -115,7 +112,7 @@ def receive_audio(output_stream):
                     pass
                 continue
             elif msg_type == MESSAGE_TYPE_AUDIO:
-                # Encrypted audio data - strip the message type byte
+                # Audio data - strip the message type byte
                 data = data[1:]
             else:
                 # Unknown message type or legacy audio (no type byte)
