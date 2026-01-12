@@ -560,6 +560,9 @@ class HexChatApp(ctk.CTk):
         # Check for disconnection
         elif message == "__DISCONNECT__":
             self.chat_box.insert("end", "--- Friend disconnected ---\n")
+            # Auto-disconnect both ways
+            if self.is_connected:
+                self.disconnect()
         # Regular text message
         else:
             self.chat_box.insert("end", f"Friend: {message}\n")
