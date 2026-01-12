@@ -66,6 +66,18 @@ def get_receiver_socket():
     return sock
 
 
+def reset_receiver_socket():
+    """Reset the receiver socket (close old one, create new one)."""
+    global sock
+    if sock:
+        try:
+            sock.close()
+        except Exception:
+            pass
+    sock = None
+    initialize_receiver_socket()
+
+
 def receive_audio(output_stream):
     """
     Receive and decrypt audio packets; discard old ones if backlog exists.
