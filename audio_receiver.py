@@ -20,6 +20,7 @@ MESSAGE_TYPE_TEXT = b'\x01'
 
 # Callback for receiving text messages
 _text_message_callback = None
+_text_message_callback_with_sender = None  # Callback that includes sender IP
 
 # Callback for incoming call requests
 _incoming_call_callback = None
@@ -28,10 +29,16 @@ _incoming_call_callback = None
 _is_deafened = False
 
 
-def set_text_message_callback(callback):
-    """Set the callback function to be called when a text message is received."""
-    global _text_message_callback
+def set_text_message_callback(callback, callback_with_sender=None):
+    """Set the callback function to be called when a text message is received.
+    
+    Args:
+        callback: Function(message) - called with just the message
+        callback_with_sender: Function(message, sender_ip) - called with message and sender IP
+    """
+    global _text_message_callback, _text_message_callback_with_sender
     _text_message_callback = callback
+    _text_message_callback_with_sender = callback_with_sender
 
 
 def set_incoming_call_callback(callback):
@@ -116,11 +123,15 @@ def receive_audio(output_stream):
                 try:
                     encrypted_msg = data[1:]
                     message = decrypt_text(encrypted_msg)
-                    print(f"[RX] Text from {addr[0]}: {message}")
+                    sender_ip = addr[0]
+                    print(f"[RX] Text from {sender_ip}: {message}")
                     # Check if it's a call request
                     if message == "__CALL_REQUEST__" and _incoming_call_callback:
-                        print(f"[RX] Calling incoming_call_callback with {addr[0]}")
-                        _incoming_call_callback(message, addr[0])
+                        print(f"[RX] Calling incoming_call_callback with {sender_ip}")
+                        _incoming_call_callback(message, sender_ip)
+                    elif _text_message_callback_with_sender:
+                        print(f"[RX] Calling text_message_callback_with_sender from {sender_ip}")
+                        _text_message_callback_with_sender(message, sender_ip)
                     elif _text_message_callback:
                         print(f"[RX] Calling text_message_callback")
                         _text_message_callback(message)

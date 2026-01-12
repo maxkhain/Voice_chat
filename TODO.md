@@ -3,6 +3,20 @@
 ## Features to Implement
 
 ### High Priority
+- [ ] Contact List & Friends
+  - ✅ Save device IPs with custom names (DONE)
+  - ✅ Maintain friends list file (DONE)
+  - [ ] Edit/delete contacts
+  - [ ] Import/export contacts
+  - [ ] Mark favorites
+
+- [ ] Multiple Device Support
+  - [ ] Connect to multiple devices simultaneously
+  - [ ] Chat with multiple contacts at same time
+  - [ ] Switch between active conversations
+  - [ ] Tab or side panel for each conversation
+  - [ ] Display active connection count
+
 - [ ] Auto-accept calls when both sides initiate
   - Detect simultaneous call requests
   - Automatically establish connection
@@ -24,22 +38,16 @@
 
 - [ ] Save Chat History Locally
   - ✅ Store messages with timestamps (DONE)
-  - ✅ Separate history per contact (DONE)
+  - ✅ Consolidated into single file (DONE)
   - ✅ Load history on reconnect (DONE)
   - ✅ Auto-load chat on app startup (DONE)
-  - ✅ Backup chat after every message (DONE)
+  - ✅ Enable chat without calling (DONE)
+  - ✅ Save messages even without voice call (DONE)
   - [ ] Export chat as text/JSON
   - [ ] Search chat history
   - [ ] Clear history option
 
 ### Medium Priority
-- [ ] Contact List
-  - Save frequently used IPs with custom names
-  - Recent connections history
-  - One-click dial from contact list
-  - Edit/delete contacts
-  - Import/export contacts
-
 - [ ] GIFs to Chat
   - GIF search integration (Giphy API)
   - GIF picker window
@@ -76,6 +84,9 @@
 - [x] AES-256 Encryption
 - [x] Network Scanner (ICMP)
 - [x] Optimized Multi-threaded Scan
+- [x] Consolidated Chat History (Single File)
+- [x] Chat Without Calling (Text-only Mode)
+- [x] Select From Scan List to Message or Call
 
 ## Notes
 - Network scanner needs ARP support for devices blocking ICMP
