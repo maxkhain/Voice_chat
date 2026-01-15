@@ -1,7 +1,7 @@
 # ui.py
 import customtkinter as ctk
 import threading
-from audio_io import (
+from audio_modules.audio_io import (
     get_audio_interface,
     get_input_devices,
     get_output_devices,
@@ -10,19 +10,19 @@ from audio_io import (
     close_stream,
     close_audio_interface
 )
-from audio_sender import send_audio, cleanup_sender, send_text_message, set_mute_state, stop_sender, reset_stop_flag as reset_sender_stop_flag
-from audio_receiver import receive_audio, cleanup_receiver, set_text_message_callback, set_deafen_state, set_incoming_call_callback, reset_receiver_socket, stop_receiver, reset_stop_flag as reset_receiver_stop_flag
-from audio_filter import reset_noise_profile
-from connection_cache import (
+from audio_modules.audio_sender import send_audio, cleanup_sender, send_text_message
+from audio_modules.audio_receiver import receive_audio, cleanup_receiver, set_text_message_callback, set_deafen_state, set_incoming_call_callback, reset_receiver_socket
+from audio_modules.audio_filter import reset_noise_profile
+from utils.connection_cache import (
     get_last_connection,
     get_last_microphone,
     get_last_speaker,
     has_cached_connection,
     save_cache,
 )
-from chat_history import add_message, load_history, display_history, clear_history, get_formatted_message, format_timestamp, format_date_header, needs_date_separator
-from network_scanner import scan_network_async, format_device_list, extract_ip_from_formatted
-from contacts import (
+from config.chat_history import add_message, load_history, display_history, clear_history, get_formatted_message, format_timestamp, format_date_header, needs_date_separator
+from utils.network_scanner import scan_network_async, format_device_list, extract_ip_from_formatted
+from config.contacts import (
     add_contact,
     get_all_contacts,
     get_contacts_display_list,
@@ -30,8 +30,8 @@ from contacts import (
     get_contact_name,
     search_contacts
 )
-from scan_cache import save_scan_results, load_scan_results
-from sound_effects import sound_calling, sound_incoming, sound_connected, sound_rejected, sound_disconnected, sound_message, sound_cancelled, stop_all_sounds, set_call_volume, set_message_incoming_volume, set_message_outgoing_volume, get_call_volume, get_message_incoming_volume, get_message_outgoing_volume, get_fun_sounds, play_custom_sound, set_send_custom_sound_callback
+from utils.scan_cache import save_scan_results, load_scan_results
+from audio_modules.sound_effects import sound_calling, sound_incoming, sound_connected, sound_rejected, sound_disconnected, sound_message, sound_cancelled, stop_all_sounds, set_call_volume, set_message_incoming_volume, set_message_outgoing_volume, get_call_volume, get_message_incoming_volume, get_message_outgoing_volume, get_fun_sounds, play_custom_sound, set_send_custom_sound_callback
 
 
 # --- APPEARANCE ---
@@ -61,7 +61,6 @@ class HexChatApp(ctk.CTk):
         self.calling_popup = None  # Track calling popup window
         self.last_scan_results = []  # Store last network scan results
         self.sidebar_width = 250  # Initial sidebar width (in pixels)
-        self.chat_input_height = 120  # Initial chat input height (in pixels)
         
         # Load cached values
         last_ip = get_last_connection()
@@ -93,9 +92,6 @@ class HexChatApp(ctk.CTk):
         x = (screen_width - window_width) // 2
         y = (screen_height - window_height) // 2
         self.geometry(f"{window_width}x{window_height}+{x}+{y}")
-        
-        # Set minimum window size (can't resize smaller than this)
-        self.minsize(window_width, window_height)
         
         # Set up window close handler
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
@@ -172,60 +168,10 @@ class HexChatApp(ctk.CTk):
         
         self.deafen_btn = ctk.CTkSwitch(self.sidebar, text="Deafen Audio", command=self.toggle_deafen)
         self.deafen_btn.pack(pady=5, padx=10)
-
-        # Sound Effects Volume Control
-        self.sound_label = ctk.CTkLabel(self.sidebar, text="🔊 Sound Effects", font=ctk.CTkFont(size=12, weight="bold"))
-        self.sound_label.pack(pady=(20, 10), padx=10)
-        
-        # Call Volume Slider
-        self.call_vol_label = ctk.CTkLabel(self.sidebar, text="Call Volume", font=ctk.CTkFont(size=10))
-        self.call_vol_label.pack(pady=(5, 2), padx=10)
-        
-        self.call_vol_slider = ctk.CTkSlider(
-            self.sidebar,
-            from_=0,
-            to=100,
-            number_of_steps=20,
-            command=self.on_call_volume_change,
-            width=170
-        )
-        self.call_vol_slider.set(get_call_volume() * 100)
-        self.call_vol_slider.pack(pady=(0, 10), padx=10)
-        
-        # Message Volume Sliders - Separate for incoming and outgoing
-        self.msg_in_vol_label = ctk.CTkLabel(self.sidebar, text="📥 Received Message Volume", font=ctk.CTkFont(size=9))
-        self.msg_in_vol_label.pack(pady=(5, 2), padx=10)
-        
-        self.msg_in_vol_slider = ctk.CTkSlider(
-            self.sidebar,
-            from_=0,
-            to=100,
-            number_of_steps=20,
-            command=self.on_message_incoming_volume_change,
-            width=170
-        )
-        self.msg_in_vol_slider.set(get_message_incoming_volume() * 100)
-        self.msg_in_vol_slider.pack(pady=(0, 5), padx=10)
-        
-        self.msg_out_vol_label = ctk.CTkLabel(self.sidebar, text="📤 Sent Message Volume", font=ctk.CTkFont(size=9))
-        self.msg_out_vol_label.pack(pady=(5, 2), padx=10)
-        
-        self.msg_out_vol_slider = ctk.CTkSlider(
-            self.sidebar,
-            from_=0,
-            to=100,
-            number_of_steps=20,
-            command=self.on_message_outgoing_volume_change,
-            width=170
-        )
-        self.msg_out_vol_slider.set(get_message_outgoing_volume() * 100)
-        self.msg_out_vol_slider.pack(pady=(0, 10), padx=10)
         self.chat_frame = ctk.CTkFrame(self, corner_radius=0, fg_color="transparent")
         self.chat_frame.grid(row=0, column=2, sticky="nsew")
         
-        self.chat_frame.grid_rowconfigure(0, weight=1)  # Chat tabs expand
-        self.chat_frame.grid_rowconfigure(1, weight=0, minsize=2)  # Separator (2px)
-        self.chat_frame.grid_rowconfigure(2, weight=0, minsize=120)  # Input frame with adjustable height
+        self.chat_frame.grid_rowconfigure(0, weight=1) # Tabs expand
         self.chat_frame.grid_columnconfigure(0, weight=1)
         
         # Tabbed Chat Interface
@@ -250,16 +196,9 @@ class HexChatApp(ctk.CTk):
         self.current_chat_ip = None
         self.chat_box = self.general_chat_box  # Default to general chat
 
-        # --- CHAT/INPUT SEPARATOR (DRAGGABLE) ---
-        self.chat_separator = ctk.CTkFrame(self.chat_frame, height=2, fg_color="gray30")
-        self.chat_separator.grid(row=1, column=0, sticky="ew", padx=10)
-        self.chat_separator.bind("<Button-1>", self.on_chat_separator_drag_start)
-        self.chat_separator.bind("<B1-Motion>", self.on_chat_separator_drag)
-        self.chat_separator.configure(cursor="sb_v_double_arrow")  # Vertical resize cursor
-
         # Message Input Area (below tabs)
         self.input_frame = ctk.CTkFrame(self.chat_frame, fg_color="transparent")
-        self.input_frame.grid(row=2, column=0, sticky="ew", padx=10, pady=10)
+        self.input_frame.grid(row=1, column=0, sticky="ew", padx=10, pady=10)
         self.input_frame.grid_columnconfigure(0, weight=1)
         
         # IP selection dropdown for chat
@@ -296,7 +235,7 @@ class HexChatApp(ctk.CTk):
         
         # Fun Sounds Panel (on right side, below chat)
         self.fun_sounds_panel_frame = ctk.CTkFrame(self.chat_frame, fg_color="transparent")
-        self.fun_sounds_panel_frame.grid(row=3, column=0, sticky="ew", padx=10, pady=(5, 10))
+        self.fun_sounds_panel_frame.grid(row=2, column=0, sticky="ew", padx=10, pady=(5, 10))
         self.fun_sounds_panel_frame.grid_columnconfigure(0, weight=1)
         
         # Horizontal scrollable frame for sound buttons
@@ -363,7 +302,7 @@ class HexChatApp(ctk.CTk):
         self.start_background_receiver()
 
     def on_separator_drag_start(self, event):
-        """Handle start of sidebar separator drag."""
+        """Handle start of separator drag."""
         self.drag_start_x = event.x_root
         self.drag_start_width = self.sidebar_width
 
@@ -382,26 +321,25 @@ class HexChatApp(ctk.CTk):
         except Exception as e:
             print(f"Error resizing sidebar: {e}")
 
-    def on_chat_separator_drag_start(self, event):
-        """Handle start of chat/input separator drag."""
-        self.chat_drag_start_y = event.y_root
-        self.chat_drag_start_height = self.chat_input_height
+    def on_separator_drag_start(self, event):
+        """Handle start of separator drag."""
+        self.drag_start_x = event.x_root
+        self.drag_start_width = self.sidebar_width
 
-    def on_chat_separator_drag(self, event):
-        """Handle separator drag to resize chat and input areas."""
+    def on_separator_drag(self, event):
+        """Handle separator drag to resize sidebar."""
         try:
-            # Calculate new height based on mouse movement
-            # Negative delta when dragging up, positive when dragging down
-            delta = event.y_root - self.chat_drag_start_y
-            # Invert delta: dragging up should increase input area
-            new_height = max(80, min(self.chat_drag_start_height - delta, 400))  # Min 80px, max 400px
+            # Calculate new width based on mouse movement
+            delta = event.x_root - self.drag_start_x
+            new_width = max(150, min(self.drag_start_width + delta, 600))  # Min 150px, max 600px
             
-            if new_height != self.chat_input_height:
-                self.chat_input_height = new_height
-                # Update input frame height
-                self.chat_frame.grid_rowconfigure(2, minsize=new_height)
+            if new_width != self.sidebar_width:
+                self.sidebar_width = new_width
+                # Update grid column configuration
+                self.grid_columnconfigure(0, minsize=self.sidebar_width)
+                self.sidebar.configure(width=self.sidebar_width)
         except Exception as e:
-            print(f"Error resizing chat area: {e}")
+            print(f"Error resizing sidebar: {e}")
 
     def start_background_receiver(self):
         """Start a background receiver thread to listen for incoming calls."""
@@ -520,10 +458,6 @@ class HexChatApp(ctk.CTk):
 
     def connect(self):
         """Initiate a voice call to the target IP."""
-        # Reset stop flags to allow audio threads to run
-        reset_receiver_stop_flag()
-        reset_sender_stop_flag()
-        
         # Prevent multiple simultaneous calls
         if self.call_state == "calling" or self.is_connected:
             print("[!] Already in a call or connecting")
@@ -705,22 +639,12 @@ class HexChatApp(ctk.CTk):
         
         def on_accept():
             """Handle accept in popup."""
-            try:
-                # Withdraw to prevent drawing issues
-                call_popup.withdraw()
-                call_popup.after(50, call_popup.destroy)
-            except Exception as e:
-                print(f"Error closing call popup: {e}")
+            call_popup.destroy()
             self.accept_call()
         
         def on_reject():
             """Handle reject in popup."""
-            try:
-                # Withdraw to prevent drawing issues
-                call_popup.withdraw()
-                call_popup.after(50, call_popup.destroy)
-            except Exception as e:
-                print(f"Error closing call popup: {e}")
+            call_popup.destroy()
             self.reject_call()
         
         accept_btn = ctk.CTkButton(
@@ -783,12 +707,7 @@ class HexChatApp(ctk.CTk):
         
         def on_cancel():
             """Handle cancel in popup."""
-            try:
-                # Withdraw to prevent drawing issues
-                calling_popup.withdraw()
-                calling_popup.after(50, calling_popup.destroy)
-            except Exception as e:
-                print(f"Error closing calling popup: {e}")
+            calling_popup.destroy()
             self.cancel_call()
         
         cancel_btn = ctk.CTkButton(
@@ -891,10 +810,6 @@ class HexChatApp(ctk.CTk):
     def accept_call(self):
         """Accept incoming call request."""
         try:
-            # Reset stop flags to allow audio threads to run
-            reset_receiver_stop_flag()
-            reset_sender_stop_flag()
-            
             if not self.incoming_call_ip:
                 return
             
@@ -1002,7 +917,6 @@ class HexChatApp(ctk.CTk):
 
     def toggle_mute(self):
         self.is_muted = self.mute_btn.get()
-        set_mute_state(self.is_muted)
         print(f"Muted: {self.is_muted}")
 
     def toggle_deafen(self):
@@ -1494,9 +1408,13 @@ class HexChatApp(ctk.CTk):
             # Create settings window
             settings_window = ctk.CTkToplevel(self)
             settings_window.title("Settings")
-            settings_window.geometry("450x350")
+            settings_window.geometry("500x700")
             settings_window.resizable(False, False)
             settings_window.transient(self)
+            
+            # Create scrollable frame for settings
+            scroll_frame = ctk.CTkScrollableFrame(settings_window)
+            scroll_frame.pack(fill="both", expand=True, padx=10, pady=10)
             
             # Title
             title_label = ctk.CTkLabel(
@@ -1504,7 +1422,7 @@ class HexChatApp(ctk.CTk):
                 text="Audio Settings",
                 font=ctk.CTkFont(size=16, weight="bold")
             )
-            title_label.pack(pady=15)
+            title_label.pack(pady=15, padx=20)
             
             # Get audio interface for device enumeration
             temp_interface = get_audio_interface()
@@ -1569,24 +1487,57 @@ class HexChatApp(ctk.CTk):
                     speaker_combo.set(device_names[0])
                     selected_speaker_idx = output_devices[0][0]
             
-            # Define close function before button frame
-            def close_settings_window():
-                """Safely close settings window."""
-                try:
-                    # Withdraw the window first to prevent drawing issues
-                    settings_window.withdraw()
-                    # Then schedule destruction to avoid Tkinter conflicts
-                    settings_window.after(50, settings_window.destroy)
-                except Exception as e:
-                    print(f"Error closing settings window: {e}")
-                    try:
-                        settings_window.destroy()
-                    except:
-                        pass
+            # Sound Effects Volume Control Section
+            sound_label = ctk.CTkLabel(scroll_frame, text="🔊 Sound Effects", font=ctk.CTkFont(size=12, weight="bold"))
+            sound_label.pack(pady=(20, 10), padx=20, anchor="w")
             
-            # Button Frame
+            # Call Volume
+            call_vol_label = ctk.CTkLabel(scroll_frame, text="Call Volume", font=ctk.CTkFont(size=10))
+            call_vol_label.pack(pady=(5, 2), padx=20, anchor="w")
+            
+            call_vol_slider = ctk.CTkSlider(
+                scroll_frame,
+                from_=0,
+                to=100,
+                number_of_steps=20,
+                command=self.on_call_volume_change,
+                width=300
+            )
+            call_vol_slider.set(get_call_volume() * 100)
+            call_vol_slider.pack(pady=(0, 10), padx=20, fill="x")
+            
+            # Message Volume Sliders - Separate for incoming and outgoing
+            msg_in_vol_label = ctk.CTkLabel(scroll_frame, text="📥 Received Message Volume", font=ctk.CTkFont(size=10))
+            msg_in_vol_label.pack(pady=(5, 2), padx=20, anchor="w")
+            
+            msg_in_vol_slider = ctk.CTkSlider(
+                scroll_frame,
+                from_=0,
+                to=100,
+                number_of_steps=20,
+                command=self.on_message_incoming_volume_change,
+                width=300
+            )
+            msg_in_vol_slider.set(get_message_incoming_volume() * 100)
+            msg_in_vol_slider.pack(pady=(0, 5), padx=20, fill="x")
+            
+            msg_out_vol_label = ctk.CTkLabel(scroll_frame, text="📤 Sent Message Volume", font=ctk.CTkFont(size=10))
+            msg_out_vol_label.pack(pady=(5, 2), padx=20, anchor="w")
+            
+            msg_out_vol_slider = ctk.CTkSlider(
+                scroll_frame,
+                from_=0,
+                to=100,
+                number_of_steps=20,
+                command=self.on_message_outgoing_volume_change,
+                width=300
+            )
+            msg_out_vol_slider.set(get_message_outgoing_volume() * 100)
+            msg_out_vol_slider.pack(pady=(0, 10), padx=20, fill="x")
+            
+            # Button Frame at bottom
             button_frame = ctk.CTkFrame(settings_window, fg_color="transparent")
-            button_frame.pack(pady=20, padx=20, fill="x")
+            button_frame.pack(pady=15, padx=20, fill="x", side="bottom")
             
             def save_settings():
                 """Save selected audio settings."""
@@ -1604,7 +1555,7 @@ class HexChatApp(ctk.CTk):
                     save_cache(self.target_ip, self.selected_device_index, self.selected_output_device_index)
                     
                     print(f"✓ Settings saved - Mic: {self.selected_device_index}, Speaker: {self.selected_output_device_index}")
-                    close_settings_window()
+                    settings_window.destroy()
                 except Exception as e:
                     print(f"Error saving settings: {e}")
             
@@ -1613,7 +1564,7 @@ class HexChatApp(ctk.CTk):
             save_btn.pack(side="left", padx=5, fill="x", expand=True)
             
             # Close Button
-            close_btn = ctk.CTkButton(button_frame, text="Cancel", command=close_settings_window)
+            close_btn = ctk.CTkButton(button_frame, text="Cancel", command=settings_window.destroy)
             close_btn.pack(side="right", padx=5, fill="x", expand=True)
             
             # Clean up temp interface
@@ -1771,19 +1722,6 @@ class HexChatApp(ctk.CTk):
     def on_closing(self):
         """Handle window close event - disconnect from call and clean up."""
         try:
-            print("[APP] Closing application, cleaning up audio threads...")
-            
-            # Signal all audio threads to stop
-            stop_sender()
-            stop_receiver()
-            
-            # Send disconnect message to the other user in any active state
-            if self.target_ip and self.call_state != "idle":
-                try:
-                    send_text_message("__DISCONNECT__", self.target_ip)
-                except Exception:
-                    pass
-            
             # Cancel outgoing call if in calling state
             if self.call_state == "calling":
                 self.cancel_call()
@@ -1792,54 +1730,26 @@ class HexChatApp(ctk.CTk):
             if self.is_connected:
                 self.disconnect()
             
-            # Close any open popups safely
+            # Close any open popups
             if self.incoming_call_popup:
                 try:
-                    # Withdraw first to prevent drawing issues
-                    self.incoming_call_popup.withdraw()
-                    self.incoming_call_popup.after(50, self.incoming_call_popup.destroy)
+                    self.incoming_call_popup.destroy()
                 except:
                     pass
             
             if self.calling_popup:
                 try:
-                    # Withdraw first to prevent drawing issues
-                    self.calling_popup.withdraw()
-                    self.calling_popup.after(50, self.calling_popup.destroy)
+                    self.calling_popup.destroy()
                 except:
                     pass
             
-            # Clean up background receiver and sender
+            # Clean up background receiver
             cleanup_receiver()
-            cleanup_sender()
             
-            # Close audio streams if they exist
-            try:
-                if hasattr(self, 'background_output_stream') and self.background_output_stream:
-                    close_stream(self.background_output_stream)
-            except Exception:
-                pass
-            
-            try:
-                if hasattr(self, 'input_stream') and self.input_stream:
-                    close_stream(self.input_stream)
-            except Exception:
-                pass
-            
-            # Close audio interface if it exists
-            try:
-                if hasattr(self, 'audio_interface') and self.audio_interface:
-                    close_audio_interface(self.audio_interface)
-            except Exception:
-                pass
-            
-            print("[APP] Cleanup complete, closing window")
             # Destroy the main window
             self.destroy()
         except Exception as e:
             print(f"Error during window close: {e}")
-            import traceback
-            traceback.print_exc()
             # Force close if cleanup fails
             self.destroy()
 
@@ -1868,6 +1778,8 @@ class HexChatApp(ctk.CTk):
             send_text_message(sound_message, target)
             
             # Play sound locally for sender
+            # Use play_custom_sound but it will call the callback which should NOT send again
+            # since we already sent above. The callback is for remote sound events only.
             play_custom_sound(sound_name, category)
             
             # Display in our chat that we sent it

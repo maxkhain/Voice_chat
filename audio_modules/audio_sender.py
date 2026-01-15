@@ -4,9 +4,9 @@ Audio sending functionality.
 import socket
 import time
 import audioop
-from audio_config import CHUNK, PORT
-from audio_filter import apply_noise_cancellation
-from audio_encryption import encrypt_audio, encrypt_text, initialize_encryption
+from audio_modules.audio_config import CHUNK, PORT
+from audio_modules.audio_filter import apply_noise_cancellation
+from audio_modules.audio_encryption import encrypt_audio, encrypt_text, initialize_encryption
 
 # Socket for sending
 sock = None

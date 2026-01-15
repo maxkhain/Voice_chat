@@ -4,9 +4,9 @@ Audio receiving functionality.
 import socket
 import select
 import time
-from audio_config import CHUNK, PORT
-import audio_sender
-from audio_encryption import decrypt_audio, decrypt_text, initialize_encryption
+from audio_modules.audio_config import CHUNK, PORT
+import audio_modules.audio_sender as audio_sender
+from audio_modules.audio_encryption import decrypt_audio, decrypt_text, initialize_encryption
 
 # Socket for receiving
 sock = None
