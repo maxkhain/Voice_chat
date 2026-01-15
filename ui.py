@@ -94,6 +94,9 @@ class HexChatApp(ctk.CTk):
         y = (screen_height - window_height) // 2
         self.geometry(f"{window_width}x{window_height}+{x}+{y}")
         
+        # Set minimum window size (can't resize smaller than this)
+        self.minsize(window_width, window_height)
+        
         # Set up window close handler
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
 
