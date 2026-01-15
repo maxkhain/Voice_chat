@@ -1732,6 +1732,13 @@ class HexChatApp(ctk.CTk):
     def on_closing(self):
         """Handle window close event - disconnect from call and clean up."""
         try:
+            # Send disconnect message to the other user in any active state
+            if self.target_ip and self.call_state != "idle":
+                try:
+                    send_text_message("__DISCONNECT__", self.target_ip)
+                except Exception:
+                    pass
+            
             # Cancel outgoing call if in calling state
             if self.call_state == "calling":
                 self.cancel_call()
