@@ -658,12 +658,20 @@ class HexChatApp(ctk.CTk):
         
         def on_accept():
             """Handle accept in popup."""
-            call_popup.destroy()
+            try:
+                # Use after to avoid drawing conflict
+                call_popup.after(100, lambda: call_popup.destroy())
+            except Exception as e:
+                print(f"Error closing call popup: {e}")
             self.accept_call()
         
         def on_reject():
             """Handle reject in popup."""
-            call_popup.destroy()
+            try:
+                # Use after to avoid drawing conflict
+                call_popup.after(100, lambda: call_popup.destroy())
+            except Exception as e:
+                print(f"Error closing call popup: {e}")
             self.reject_call()
         
         accept_btn = ctk.CTkButton(
@@ -726,7 +734,11 @@ class HexChatApp(ctk.CTk):
         
         def on_cancel():
             """Handle cancel in popup."""
-            calling_popup.destroy()
+            try:
+                # Use after to avoid drawing conflict
+                calling_popup.after(100, lambda: calling_popup.destroy())
+            except Exception as e:
+                print(f"Error closing calling popup: {e}")
             self.cancel_call()
         
         cancel_btn = ctk.CTkButton(
@@ -1565,6 +1577,14 @@ class HexChatApp(ctk.CTk):
             button_frame = ctk.CTkFrame(settings_window, fg_color="transparent")
             button_frame.pack(pady=15, padx=20, fill="x")
             
+            def close_settings_window():
+                """Safely close settings window."""
+                try:
+                    # Use after to avoid drawing conflict
+                    settings_window.after(100, lambda: settings_window.destroy())
+                except Exception as e:
+                    print(f"Error closing settings window: {e}")
+            
             def save_settings():
                 """Save selected audio settings."""
                 try:
@@ -1581,7 +1601,7 @@ class HexChatApp(ctk.CTk):
                     save_cache(self.target_ip, self.selected_device_index, self.selected_output_device_index)
                     
                     print(f"✓ Settings saved - Mic: {self.selected_device_index}, Speaker: {self.selected_output_device_index}")
-                    settings_window.destroy()
+                    close_settings_window()
                 except Exception as e:
                     print(f"Error saving settings: {e}")
             
@@ -1590,7 +1610,7 @@ class HexChatApp(ctk.CTk):
             save_btn.pack(side="left", padx=5, fill="x", expand=True)
             
             # Close Button
-            close_btn = ctk.CTkButton(button_frame, text="Cancel", command=settings_window.destroy)
+            close_btn = ctk.CTkButton(button_frame, text="Cancel", command=close_settings_window)
             close_btn.pack(side="right", padx=5, fill="x", expand=True)
             
             # Clean up temp interface
@@ -1769,16 +1789,18 @@ class HexChatApp(ctk.CTk):
             if self.is_connected:
                 self.disconnect()
             
-            # Close any open popups
+            # Close any open popups safely
             if self.incoming_call_popup:
                 try:
-                    self.incoming_call_popup.destroy()
+                    # Use after to avoid drawing conflict
+                    self.incoming_call_popup.after(50, self.incoming_call_popup.destroy)
                 except:
                     pass
             
             if self.calling_popup:
                 try:
-                    self.calling_popup.destroy()
+                    # Use after to avoid drawing conflict
+                    self.calling_popup.after(50, self.calling_popup.destroy)
                 except:
                     pass
             
