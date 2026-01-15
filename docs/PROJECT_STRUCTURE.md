@@ -7,7 +7,12 @@ The project is organized into logical modules for better maintainability and cla
 ```
 Voice_chat/
 ├── main.py                          # Main entry point
-├── README.md                        # Project overview
+├── contacts.json                    # Saved contacts data file
+├── .chat_history.json               # Chat history storage
+├── .connection_cache.json           # Last connection settings
+├── .scan_cache.json                 # Cached network scan results
+├── .gitignore                       # Git ignore rules
+├── create_shortcut.ps1              # PowerShell shortcut script
 │
 ├── audio_modules/                   # Audio processing and I/O
 │   ├── __init__.py
@@ -19,9 +24,23 @@ Voice_chat/
 │   ├── audio_sender.py             # Outgoing audio transmission
 │   ├── sound_effects.py            # Sound effects and notifications
 │   └── sounds/                     # Sound files directory
-│       ├── basic/                  # Basic notification sounds
+│       ├── basic/                  # System notification sounds
+│       │   ├── calling.wav
+│       │   ├── cancelled.wav
+│       │   ├── connected.wav
+│       │   ├── disconnected.wav
+│       │   ├── incoming.wav
+│       │   ├── message.wav
+│       │   └── rejected.wav
 │       ├── fun/                    # Fun reaction sounds
+│       │   ├── boing.wav
+│       │   ├── drums.wav
+│       │   └── squeaky.wav
 │       └── reactions/              # Reaction sound effects
+│           ├── cartoon-laugh.wav
+│           ├── crowd-laugh.wav
+│           ├── disappointed-trombone.wav
+│           └── sad-trombone.wav
 │
 ├── ui_modules/                      # User interface
 │   ├── __init__.py
@@ -43,11 +62,15 @@ Voice_chat/
 │   ├── build_shortcut_generator.bat # Build script for executable
 │   └── run_hexchat.bat             # Windows launcher batch file
 │
-└── docs/                           # Documentation
+└── docs/                           # Documentation (14 files)
+    ├── README.md                   # Documentation index
     ├── BUILD_SUMMARY.md            # Build and feature summary
     ├── CALL_TIMESTAMPS.md          # Call timestamping documentation
     ├── DATE_TIME_IMPLEMENTATION.md # Date/time feature details
     ├── EMOJI_SUPPORT.md            # Emoji functionality
+    ├── PROJECT_STRUCTURE.md        # This file
+    ├── QUICK_REFERENCE.md          # Quick reference guide
+    ├── REORGANIZATION_SUMMARY.md   # Code reorganization details
     ├── SHORTCUT_GENERATOR_README.md # Shortcut generator guide
     ├── SOUND_BUTTONS_LAYOUT.md     # Sound button UI layout
     ├── SOUND_EFFECTS.md            # Sound effects system
@@ -56,42 +79,15 @@ Voice_chat/
     └── VOLUME_CONTROL.md           # Volume control documentation
 ```
 
-## Module Descriptions
+## Data Files (Root Level)
 
-### audio_modules/
-Handles all audio-related functionality:
-- **audio_config.py**: Central configuration for audio settings
-- **audio_io.py**: Stream management with PyAudio
-- **audio_sender.py**: UDP audio transmission with encryption
-- **audio_receiver.py**: Audio reception and message handling
-- **audio_filter.py**: Comprehensive audio filtering and DSP
-- **audio_encryption.py**: Audio encryption/decryption
-- **sound_effects.py**: Notification and reaction sounds
-
-### ui_modules/
-User interface components:
-- **ui.py**: Main GUI application using CustomTkinter
-  - Contact management
-  - Chat interface with tabbed conversations
-  - Call handling (accept/reject/cancel)
-  - Settings window for audio configuration
-  - Emoji and fun sounds panels
-  - Volume controls for different sound types
-
-### config/
-Data management and configuration:
-- **chat_history.py**: Persistent chat history with date separators
-- **contacts.py**: Contact list and management
-
-### utils/
-Utility and tool functions:
-- **connection_cache.py**: Caches last connection and device settings
-- **scan_cache.py**: Caches network scan results
-- **network_scanner.py**: Network device discovery
-- **shortcut_generator.py**: Creates desktop shortcuts for easy launching
-- **organize_sounds.py**: Sound file organization tool
-
-## Import Patterns
+These files store persistent application data:
+- **contacts.json**: Saved contacts with names and IPs
+- **.chat_history.json**: All chat messages with timestamps
+- **.connection_cache.json**: Last used IP, microphone, speaker
+- **.scan_cache.json**: Cached network scan results
+- **.chat_backups/**: Backup copies of chat history
+- **.chat_history/**: Legacy chat history folder (if exists)
 
 All modules use relative imports based on their location:
 
