@@ -61,6 +61,7 @@ class HexChatApp(ctk.CTk):
         self.calling_popup = None  # Track calling popup window
         self.last_scan_results = []  # Store last network scan results
         self.sidebar_width = 250  # Initial sidebar width (in pixels)
+        self.chat_input_height = 120  # Initial chat input height (in pixels)
         
         # Load cached values
         last_ip = get_last_connection()
@@ -219,7 +220,9 @@ class HexChatApp(ctk.CTk):
         self.chat_frame = ctk.CTkFrame(self, corner_radius=0, fg_color="transparent")
         self.chat_frame.grid(row=0, column=2, sticky="nsew")
         
-        self.chat_frame.grid_rowconfigure(0, weight=1) # Tabs expand
+        self.chat_frame.grid_rowconfigure(0, weight=1)  # Chat tabs expand
+        self.chat_frame.grid_rowconfigure(1, weight=0, minsize=2)  # Separator (2px)
+        self.chat_frame.grid_rowconfigure(2, weight=0, minsize=120)  # Input frame with adjustable height
         self.chat_frame.grid_columnconfigure(0, weight=1)
         
         # Tabbed Chat Interface
@@ -244,9 +247,16 @@ class HexChatApp(ctk.CTk):
         self.current_chat_ip = None
         self.chat_box = self.general_chat_box  # Default to general chat
 
+        # --- CHAT/INPUT SEPARATOR (DRAGGABLE) ---
+        self.chat_separator = ctk.CTkFrame(self.chat_frame, height=2, fg_color="gray30")
+        self.chat_separator.grid(row=1, column=0, sticky="ew", padx=10)
+        self.chat_separator.bind("<Button-1>", self.on_chat_separator_drag_start)
+        self.chat_separator.bind("<B1-Motion>", self.on_chat_separator_drag)
+        self.chat_separator.configure(cursor="sb_v_double_arrow")  # Vertical resize cursor
+
         # Message Input Area (below tabs)
         self.input_frame = ctk.CTkFrame(self.chat_frame, fg_color="transparent")
-        self.input_frame.grid(row=1, column=0, sticky="ew", padx=10, pady=10)
+        self.input_frame.grid(row=2, column=0, sticky="ew", padx=10, pady=10)
         self.input_frame.grid_columnconfigure(0, weight=1)
         
         # IP selection dropdown for chat
@@ -283,7 +293,7 @@ class HexChatApp(ctk.CTk):
         
         # Fun Sounds Panel (on right side, below chat)
         self.fun_sounds_panel_frame = ctk.CTkFrame(self.chat_frame, fg_color="transparent")
-        self.fun_sounds_panel_frame.grid(row=2, column=0, sticky="ew", padx=10, pady=(5, 10))
+        self.fun_sounds_panel_frame.grid(row=3, column=0, sticky="ew", padx=10, pady=(5, 10))
         self.fun_sounds_panel_frame.grid_columnconfigure(0, weight=1)
         
         # Horizontal scrollable frame for sound buttons
@@ -350,7 +360,7 @@ class HexChatApp(ctk.CTk):
         self.start_background_receiver()
 
     def on_separator_drag_start(self, event):
-        """Handle start of separator drag."""
+        """Handle start of sidebar separator drag."""
         self.drag_start_x = event.x_root
         self.drag_start_width = self.sidebar_width
 
@@ -369,25 +379,26 @@ class HexChatApp(ctk.CTk):
         except Exception as e:
             print(f"Error resizing sidebar: {e}")
 
-    def on_separator_drag_start(self, event):
-        """Handle start of separator drag."""
-        self.drag_start_x = event.x_root
-        self.drag_start_width = self.sidebar_width
+    def on_chat_separator_drag_start(self, event):
+        """Handle start of chat/input separator drag."""
+        self.chat_drag_start_y = event.y_root
+        self.chat_drag_start_height = self.chat_input_height
 
-    def on_separator_drag(self, event):
-        """Handle separator drag to resize sidebar."""
+    def on_chat_separator_drag(self, event):
+        """Handle separator drag to resize chat and input areas."""
         try:
-            # Calculate new width based on mouse movement
-            delta = event.x_root - self.drag_start_x
-            new_width = max(150, min(self.drag_start_width + delta, 600))  # Min 150px, max 600px
+            # Calculate new height based on mouse movement
+            # Negative delta when dragging up, positive when dragging down
+            delta = event.y_root - self.chat_drag_start_y
+            # Invert delta: dragging up should increase input area
+            new_height = max(80, min(self.chat_drag_start_height - delta, 400))  # Min 80px, max 400px
             
-            if new_width != self.sidebar_width:
-                self.sidebar_width = new_width
-                # Update grid column configuration
-                self.grid_columnconfigure(0, minsize=self.sidebar_width)
-                self.sidebar.configure(width=self.sidebar_width)
+            if new_height != self.chat_input_height:
+                self.chat_input_height = new_height
+                # Update input frame height
+                self.chat_frame.grid_rowconfigure(2, minsize=new_height)
         except Exception as e:
-            print(f"Error resizing sidebar: {e}")
+            print(f"Error resizing chat area: {e}")
 
     def start_background_receiver(self):
         """Start a background receiver thread to listen for incoming calls."""
