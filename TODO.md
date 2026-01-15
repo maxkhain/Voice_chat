@@ -62,6 +62,8 @@
   - Read receipts
   - Typing indicators
   - Message search
+  - Auto size window
+
 
 - [ ] Performance Optimizations
   - Reduce latency
