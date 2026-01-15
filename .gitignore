@@ -140,3 +140,5 @@ dmypy.json
 *.wav
 *.mp3
 audio_recordings/
+contacts.json
+.scan_cache.json
