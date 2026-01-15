@@ -66,12 +66,14 @@ class HexChatApp(ctk.CTk):
         last_mic = get_last_microphone()
         last_speaker = get_last_speaker()
         
+        # Set device indices from cache (will be used in settings window)
+        if last_mic is not None:
+            self.selected_device_index = last_mic
+        if last_speaker is not None:
+            self.selected_output_device_index = last_speaker
+        
         # Load cached scan results from previous scan
         self.last_scan_results = load_scan_results()
-        
-        # Populate devices from cache (for later use in settings)
-        self.populate_devices(last_mic)
-        self.populate_output_devices(last_speaker)
         
         # Store last IP for later use
         self.last_loaded_ip = last_ip
@@ -124,10 +126,6 @@ class HexChatApp(ctk.CTk):
         # Disconnect Button
         self.disconnect_btn = ctk.CTkButton(self.sidebar, text="Disconnect", command=self.disconnect, state="disabled")
         self.disconnect_btn.pack(pady=3, padx=10, fill="x")
-
-        # Cancel Call Button (hidden by default)
-        self.cancel_call_btn = ctk.CTkButton(self.sidebar, text="Cancel Call", command=self.cancel_call, state="disabled")
-        self.cancel_call_btn.pack(pady=10, padx=10, fill="x")
 
         # Incoming Call Frame (hidden by default)
         self.call_frame = ctk.CTkFrame(self.sidebar)
@@ -284,6 +282,7 @@ class HexChatApp(ctk.CTk):
             # Extract device index from the choice string (e.g., "0: Built-in Microphone")
             device_index = int(choice.split(":")[0])
             self.selected_device_index = device_index
+            save_cache(self.target_ip, self.selected_device_index, self.selected_output_device_index)
             print(f"Selected device: {choice}")
 
     def populate_output_devices(self, cached_device_id=None):
@@ -321,6 +320,7 @@ class HexChatApp(ctk.CTk):
             # Extract device index from the choice string
             device_index = int(choice.split(":")[0])
             self.selected_output_device_index = device_index
+            save_cache(self.target_ip, self.selected_device_index, self.selected_output_device_index)
             print(f"Selected output device: {choice}")
 
     def connect(self):
@@ -637,7 +637,6 @@ class HexChatApp(ctk.CTk):
             
             # CRITICAL: Make sure connect button is enabled
             self.connect_btn.configure(state="normal", text="Connect Voice/Chat")
-            self.cancel_call_btn.configure(state="disabled")
             
             # Restart background receiver LAST to listen for new calls
             try:
@@ -858,8 +857,6 @@ class HexChatApp(ctk.CTk):
                 self.call_state = "idle"
                 self.chat_box.insert("end", "--- Call rejected ---\n")
                 self.connect_btn.configure(state="normal", text="Connect Voice/Chat")
-                self.cancel_call_btn.configure(state="disabled")
-                self.ip_entry.configure(state="normal")
                 
                 # Clean up
                 cleanup_receiver()
@@ -980,7 +977,7 @@ class HexChatApp(ctk.CTk):
             # Create settings window
             settings_window = ctk.CTkToplevel(self)
             settings_window.title("Settings")
-            settings_window.geometry("450x300")
+            settings_window.geometry("450x350")
             settings_window.resizable(False, False)
             settings_window.transient(self)
             
@@ -992,6 +989,9 @@ class HexChatApp(ctk.CTk):
             )
             title_label.pack(pady=15, padx=20)
             
+            # Get audio interface for device enumeration
+            temp_interface = get_audio_interface()
+            
             # Microphone Section
             mic_frame = ctk.CTkFrame(settings_window)
             mic_frame.pack(pady=10, padx=20, fill="x")
@@ -1002,13 +1002,13 @@ class HexChatApp(ctk.CTk):
             mic_combo = ctk.CTkComboBox(
                 mic_frame,
                 values=[],
-                state="readonly",
-                command=self.on_device_selected
+                state="readonly"
             )
             mic_combo.pack(fill="x")
             
             # Populate microphone list
-            devices = get_input_devices()
+            devices = get_input_devices(temp_interface)
+            selected_mic_idx = None
             if devices:
                 device_names = [f"{idx}: {name}" for idx, name in devices]
                 mic_combo.configure(values=device_names)
@@ -1016,7 +1016,11 @@ class HexChatApp(ctk.CTk):
                 for idx, name in devices:
                     if idx == self.selected_device_index:
                         mic_combo.set(f"{idx}: {name}")
+                        selected_mic_idx = idx
                         break
+                if not mic_combo.get():  # If not set, use first
+                    mic_combo.set(device_names[0])
+                    selected_mic_idx = devices[0][0]
             
             # Speaker Section
             speaker_frame = ctk.CTkFrame(settings_window)
@@ -1028,13 +1032,13 @@ class HexChatApp(ctk.CTk):
             speaker_combo = ctk.CTkComboBox(
                 speaker_frame,
                 values=[],
-                state="readonly",
-                command=self.on_output_device_selected
+                state="readonly"
             )
             speaker_combo.pack(fill="x")
             
             # Populate speaker list
-            output_devices = get_output_devices()
+            output_devices = get_output_devices(temp_interface)
+            selected_speaker_idx = None
             if output_devices:
                 device_names = [f"{idx}: {name}" for idx, name in output_devices]
                 speaker_combo.configure(values=device_names)
@@ -1042,11 +1046,46 @@ class HexChatApp(ctk.CTk):
                 for idx, name in output_devices:
                     if idx == self.selected_output_device_index:
                         speaker_combo.set(f"{idx}: {name}")
+                        selected_speaker_idx = idx
                         break
+                if not speaker_combo.get():  # If not set, use first
+                    speaker_combo.set(device_names[0])
+                    selected_speaker_idx = output_devices[0][0]
+            
+            # Button Frame
+            button_frame = ctk.CTkFrame(settings_window, fg_color="transparent")
+            button_frame.pack(pady=20, padx=20, fill="x")
+            
+            def save_settings():
+                """Save selected audio settings."""
+                try:
+                    # Extract device indices
+                    if mic_combo.get():
+                        mic_idx = int(mic_combo.get().split(":")[0])
+                        self.selected_device_index = mic_idx
+                    
+                    if speaker_combo.get():
+                        speaker_idx = int(speaker_combo.get().split(":")[0])
+                        self.selected_output_device_index = speaker_idx
+                    
+                    # Save to cache
+                    save_cache(self.target_ip, self.selected_device_index, self.selected_output_device_index)
+                    
+                    print(f"✓ Settings saved - Mic: {self.selected_device_index}, Speaker: {self.selected_output_device_index}")
+                    settings_window.destroy()
+                except Exception as e:
+                    print(f"Error saving settings: {e}")
+            
+            # Save Button
+            save_btn = ctk.CTkButton(button_frame, text="Save", command=save_settings, fg_color="green", hover_color="darkgreen")
+            save_btn.pack(side="left", padx=5, fill="x", expand=True)
             
             # Close Button
-            close_btn = ctk.CTkButton(settings_window, text="Close", command=settings_window.destroy)
-            close_btn.pack(pady=20, padx=20, fill="x")
+            close_btn = ctk.CTkButton(button_frame, text="Cancel", command=settings_window.destroy)
+            close_btn.pack(side="right", padx=5, fill="x", expand=True)
+            
+            # Clean up temp interface
+            temp_interface.terminate()
             
             print("✓ Settings window opened")
         except Exception as e:
