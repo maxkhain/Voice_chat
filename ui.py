@@ -22,7 +22,7 @@ from connection_cache import (
 )
 from chat_history import add_message, load_history, display_history, clear_history, get_formatted_message, format_timestamp, format_date_header, needs_date_separator
 from network_scanner import scan_network_async, format_device_list, extract_ip_from_formatted
-from sound_effects import sound_calling, sound_incoming, sound_connected, sound_rejected, sound_disconnected, sound_message, sound_message_sent, sound_cancelled, stop_all_sounds, set_call_volume, set_message_incoming_volume, set_message_outgoing_volume, get_call_volume, get_message_incoming_volume, get_message_outgoing_volume, get_fun_sounds, play_custom_sound, set_send_custom_sound_callback
+from sound_effects import sound_calling, sound_incoming, sound_connected, sound_rejected, sound_disconnected, sound_message, sound_cancelled, stop_all_sounds, set_call_volume, set_message_incoming_volume, set_message_outgoing_volume, get_call_volume, get_message_incoming_volume, get_message_outgoing_volume, get_fun_sounds, play_custom_sound, set_send_custom_sound_callback
 
 
 # --- APPEARANCE ---
@@ -284,6 +284,10 @@ class HexChatApp(ctk.CTk):
         self.msg_entry.pack(side="left", fill="both", expand=True, padx=(0, 10))
         self.msg_entry.bind("<Return>", self.send_msg)
         
+        # Emoji toggle button
+        self.emoji_btn = ctk.CTkButton(self.input_frame, text="😊", width=40, font=ctk.CTkFont(size=16), command=self.toggle_emoji_panel)
+        self.emoji_btn.pack(side="left", padx=(0, 5))
+        
         # Send button
         self.send_btn = ctk.CTkButton(self.input_frame, text="Send", width=60, command=self.send_msg)
         self.send_btn.pack(side="right")
@@ -323,6 +327,35 @@ class HexChatApp(ctk.CTk):
             # Show placeholder if no fun sounds found
             placeholder = ctk.CTkLabel(self.fun_sounds_frame, text="No fun sounds found", text_color="gray", font=ctk.CTkFont(size=9))
             placeholder.pack(padx=10, pady=10)
+
+        # Emoji Panel (collapsible)
+        self.emoji_panel_frame = ctk.CTkFrame(self.chat_frame, fg_color="transparent")
+        self.emoji_panel_frame.grid(row=3, column=0, sticky="ew", padx=10, pady=(5, 10))
+        self.emoji_panel_frame.grid_columnconfigure(0, weight=1)
+        
+        # Horizontal scrollable frame for emoji buttons
+        self.emoji_frame = ctk.CTkScrollableFrame(self.emoji_panel_frame, fg_color="transparent", orientation="horizontal")
+        self.emoji_frame.pack(fill="x", expand=True)
+        
+        # Track emoji panel state
+        self.emoji_panel_visible = False
+        self.emoji_panel_frame.pack_forget()  # Hide initially
+        
+        # Create emoji buttons with better styling
+        emojis = "😊😂😍🥰😎👍👎✌️🙏🤝❤️💔💛💚💙🔥⚡✨🌟💫🎉🎊🎈🎁🎀😭😡😱😴🤔😶😬😲🙈🙉🙊🤤😪😷🤒🤕😵🤮🤢🤯🤠🥴😕😟☹️🙁😞😖😢😤😠😈👿💀☠️😻😸😹😺😼😽🙀😿😾🎭"
+        
+        for emoji in emojis:
+            emoji_btn = ctk.CTkButton(
+                self.emoji_frame,
+                text=emoji,
+                width=50,
+                height=50,
+                font=ctk.CTkFont(size=24),
+                fg_color="transparent",
+                border_width=0,
+                command=lambda e=emoji: self.insert_emoji_char(e)
+            )
+            emoji_btn.pack(side="left", padx=2, pady=4)
 
         # Start background receiver to listen for incoming calls
         self.start_background_receiver()
@@ -828,10 +861,29 @@ class HexChatApp(ctk.CTk):
         # Send to network
         send_text_message(msg, target)
         
-        # Play outgoing message sound
-        sound_message_sent()
+        self.msg_entry.delete(0, "end")
+
+    def toggle_emoji_panel(self):
+        """Toggle visibility of emoji panel."""
+        if self.emoji_panel_visible:
+            self.emoji_panel_frame.pack_forget()
+            self.emoji_panel_visible = False
+        else:
+            self.emoji_panel_frame.grid(row=3, column=0, sticky="ew", padx=10, pady=(5, 10))
+            self.emoji_panel_visible = True
+
+    def insert_emoji_char(self, emoji: str):
+        """Insert emoji at cursor position in message entry."""
+        current_text = self.msg_entry.get()
+        insert_pos = self.msg_entry.index("insert")
+        new_text = current_text[:insert_pos] + emoji + current_text[insert_pos:]
         
         self.msg_entry.delete(0, "end")
+        self.msg_entry.insert(0, new_text)
+        
+        # Set cursor after inserted emoji
+        self.msg_entry.icursor(insert_pos + len(emoji))
+        self.msg_entry.focus()
 
     def receive_msg_update(self, message):
         # This function is called when a message arrives
