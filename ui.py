@@ -11,7 +11,7 @@ from audio_io import (
     close_audio_interface
 )
 from audio_sender import send_audio, cleanup_sender, send_text_message
-from audio_receiver import receive_audio, cleanup_receiver, set_text_message_callback, set_deafen_state, set_deafen_state, set_incoming_call_callback, reset_receiver_socket
+from audio_receiver import receive_audio, cleanup_receiver, set_text_message_callback, set_deafen_state, set_incoming_call_callback, reset_receiver_socket
 from audio_filter import reset_noise_profile
 from connection_cache import (
     get_last_connection,
@@ -20,7 +20,7 @@ from connection_cache import (
     has_cached_connection,
     save_cache,
 )
-from chat_history import add_message, load_history, display_history, clear_history, get_formatted_message, format_timestamp
+from chat_history import add_message, load_history, display_history, clear_history, get_formatted_message, format_timestamp, format_date_header, needs_date_separator
 from network_scanner import scan_network_async, format_device_list, extract_ip_from_formatted
 from contacts import (
     add_contact,
@@ -31,6 +31,7 @@ from contacts import (
     search_contacts
 )
 from scan_cache import save_scan_results, load_scan_results
+from sound_effects import sound_calling, sound_incoming, sound_connected, sound_rejected, sound_disconnected, sound_message, sound_cancelled, stop_all_sounds, set_call_volume, set_message_incoming_volume, set_message_outgoing_volume, get_call_volume, get_message_incoming_volume, get_message_outgoing_volume, get_fun_sounds, play_custom_sound, set_send_custom_sound_callback
 
 
 # --- APPEARANCE ---
@@ -80,7 +81,17 @@ class HexChatApp(ctk.CTk):
         
         # Window Setup
         self.title("HexChat")
-        self.geometry("800x600")
+        self.geometry("1200x800")
+        
+        # Get screen dimensions and center window
+        self.update_idletasks()
+        screen_width = self.winfo_screenwidth()
+        screen_height = self.winfo_screenheight()
+        window_width = 1200
+        window_height = 800
+        x = (screen_width - window_width) // 2
+        y = (screen_height - window_height) // 2
+        self.geometry(f"{window_width}x{window_height}+{x}+{y}")
         
         # Set up window close handler
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
@@ -91,10 +102,14 @@ class HexChatApp(ctk.CTk):
         self.grid_columnconfigure(2, weight=1)  # Chat area expands
         self.grid_rowconfigure(0, weight=1)     # Content expands vertically
 
-        # --- SIDEBAR (LEFT) ---
-        self.sidebar = ctk.CTkFrame(self, width=self.sidebar_width, corner_radius=0)
-        self.sidebar.grid(row=0, column=0, sticky="nsew")
-        self.sidebar.grid_propagate(False)  # Keep sidebar at fixed width
+        # --- SIDEBAR (LEFT) with Scrollbar ---
+        self.sidebar_frame = ctk.CTkFrame(self, corner_radius=0)
+        self.sidebar_frame.grid(row=0, column=0, sticky="nsew", padx=0, pady=0)
+        self.sidebar_frame.grid_rowconfigure(0, weight=1)
+        
+        # Scrollable sidebar
+        self.sidebar = ctk.CTkScrollableFrame(self.sidebar_frame, width=220, corner_radius=0)
+        self.sidebar.grid(row=0, column=0, sticky="nsew", padx=0, pady=0)
 
         self.logo_label = ctk.CTkLabel(self.sidebar, text="HEXCHAT P2P", font=ctk.CTkFont(size=18, weight="bold"))
         self.logo_label.pack(pady=12)
@@ -146,6 +161,7 @@ class HexChatApp(ctk.CTk):
 
         self.reject_btn = ctk.CTkButton(self.call_buttons_frame, text="Reject", command=self.reject_call, width=80)
         self.reject_btn.pack(side="right", padx=5)
+        
         # Voice Controls
         self.mute_btn = ctk.CTkSwitch(self.sidebar, text="Mute Mic", command=self.toggle_mute)
         self.mute_btn.pack(pady=10, padx=10)
@@ -153,41 +169,205 @@ class HexChatApp(ctk.CTk):
         self.deafen_btn = ctk.CTkSwitch(self.sidebar, text="Deafen Audio", command=self.toggle_deafen)
         self.deafen_btn.pack(pady=5, padx=10)
 
-        # --- SEPARATOR (DRAGGABLE) ---
-        self.separator = ctk.CTkFrame(self, width=2, fg_color="gray30")
-        self.separator.grid(row=0, column=1, sticky="nsew")
-        self.separator.bind("<Button-1>", self.on_separator_drag_start)
-        self.separator.bind("<B1-Motion>", self.on_separator_drag)
-        self.separator.configure(cursor="sb_h_double_arrow")  # Horizontal resize cursor
+        # Sound Effects Volume Control
+        self.sound_label = ctk.CTkLabel(self.sidebar, text="🔊 Sound Effects", font=ctk.CTkFont(size=12, weight="bold"))
+        self.sound_label.pack(pady=(20, 10), padx=10)
         
-        # --- CHAT AREA (RIGHT) ---
+        # Call Volume Slider
+        self.call_vol_label = ctk.CTkLabel(self.sidebar, text="Call Volume", font=ctk.CTkFont(size=10))
+        self.call_vol_label.pack(pady=(5, 2), padx=10)
+        
+        self.call_vol_slider = ctk.CTkSlider(
+            self.sidebar,
+            from_=0,
+            to=100,
+            number_of_steps=20,
+            command=self.on_call_volume_change,
+            width=170
+        )
+        self.call_vol_slider.set(get_call_volume() * 100)
+        self.call_vol_slider.pack(pady=(0, 10), padx=10)
+        
+        # Message Volume Sliders - Separate for incoming and outgoing
+        self.msg_in_vol_label = ctk.CTkLabel(self.sidebar, text="📥 Received Message Volume", font=ctk.CTkFont(size=9))
+        self.msg_in_vol_label.pack(pady=(5, 2), padx=10)
+        
+        self.msg_in_vol_slider = ctk.CTkSlider(
+            self.sidebar,
+            from_=0,
+            to=100,
+            number_of_steps=20,
+            command=self.on_message_incoming_volume_change,
+            width=170
+        )
+        self.msg_in_vol_slider.set(get_message_incoming_volume() * 100)
+        self.msg_in_vol_slider.pack(pady=(0, 5), padx=10)
+        
+        self.msg_out_vol_label = ctk.CTkLabel(self.sidebar, text="📤 Sent Message Volume", font=ctk.CTkFont(size=9))
+        self.msg_out_vol_label.pack(pady=(5, 2), padx=10)
+        
+        self.msg_out_vol_slider = ctk.CTkSlider(
+            self.sidebar,
+            from_=0,
+            to=100,
+            number_of_steps=20,
+            command=self.on_message_outgoing_volume_change,
+            width=170
+        )
+        self.msg_out_vol_slider.set(get_message_outgoing_volume() * 100)
+        self.msg_out_vol_slider.pack(pady=(0, 10), padx=10)
         self.chat_frame = ctk.CTkFrame(self, corner_radius=0, fg_color="transparent")
         self.chat_frame.grid(row=0, column=2, sticky="nsew")
         
-        self.chat_frame.grid_rowconfigure(0, weight=1) # History expands
+        self.chat_frame.grid_rowconfigure(0, weight=1) # Tabs expand
         self.chat_frame.grid_columnconfigure(0, weight=1)
-
-        # Chat History box
-        self.chat_box = ctk.CTkTextbox(self.chat_frame, state="disabled")
-        self.chat_box.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
         
-        # Auto-load previous chat history if available
+        # Tabbed Chat Interface
+        self.chat_tabview = ctk.CTkTabview(self.chat_frame)
+        self.chat_tabview.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
+        
+        # Dictionary to store chat boxes for each contact IP
+        self.chat_boxes = {}  # {ip: chat_textbox}
+        self.chat_tabs = {}   # {ip: tab_name}
+        
+        # Create initial tab for general chat
+        self.general_tab = self.chat_tabview.add("💬 General")
+        self.general_chat_box = ctk.CTkTextbox(self.general_tab, state="disabled")
+        self.general_chat_box.pack(side="left", fill="both", expand=True, padx=5, pady=5)
+        
+        # Create scrollbar for general tab
+        self.general_scrollbar = ctk.CTkScrollbar(self.general_tab, command=self.general_chat_box.yview)
+        self.general_scrollbar.pack(side="right", fill="y", padx=5, pady=5)
+        self.general_chat_box.configure(yscrollcommand=self.general_scrollbar.set)
+        
+        # Keep reference to currently selected tab
+        self.current_chat_ip = None
+        self.chat_box = self.general_chat_box  # Default to general chat
+
+        # Message Input Area (below tabs)
+        self.input_frame = ctk.CTkFrame(self.chat_frame, fg_color="transparent")
+        self.input_frame.grid(row=1, column=0, sticky="ew", padx=10, pady=10)
+        self.input_frame.grid_columnconfigure(0, weight=1)
+        
+        # IP selection dropdown for chat
+        self.chat_ip_label = ctk.CTkLabel(self.input_frame, text="Chat with:", font=ctk.CTkFont(size=10))
+        self.chat_ip_label.pack(side="left", padx=(0, 5))
+        
+        self.chat_ip_var = ctk.StringVar(value="Select contact...")
+        self.chat_ip_combo = ctk.CTkComboBox(
+            self.input_frame,
+            variable=self.chat_ip_var,
+            values=["General"],
+            state="readonly",
+            command=self.on_chat_contact_selected,
+            width=150
+        )
+        self.chat_ip_combo.pack(side="left", padx=(0, 10))
+        
+        # Auto-load previous chat history if available (after combo box created)
         if last_ip:
-            self.load_previous_chat(last_ip)
-
-        # Message Input
-        self.entry_frame = ctk.CTkFrame(self.chat_frame, fg_color="transparent")
-        self.entry_frame.grid(row=1, column=0, sticky="ew", padx=10, pady=10)
-        self.entry_frame.grid_columnconfigure(0, weight=1)
+            self.create_or_switch_chat_tab(last_ip)
         
-        self.msg_entry = ctk.CTkEntry(self.entry_frame, placeholder_text="Message @Friend")
+        # Message input
+        self.msg_entry = ctk.CTkEntry(self.input_frame, placeholder_text="Type message...")
         self.msg_entry.pack(side="left", fill="both", expand=True, padx=(0, 10))
-        self.msg_entry.bind("<Return>", self.send_msg) # Send on Enter key
-        self.send_btn = ctk.CTkButton(self.entry_frame, text="Send", width=60, command=self.send_msg)
+        self.msg_entry.bind("<Return>", self.send_msg)
+        
+        # Emoji toggle button
+        self.emoji_btn = ctk.CTkButton(self.input_frame, text="😊", width=40, font=ctk.CTkFont(size=16), command=self.toggle_emoji_panel)
+        self.emoji_btn.pack(side="left", padx=(0, 5))
+        
+        # Send button
+        self.send_btn = ctk.CTkButton(self.input_frame, text="Send", width=60, command=self.send_msg)
         self.send_btn.pack(side="right")
+        
+        # Fun Sounds Panel (on right side, below chat)
+        self.fun_sounds_panel_frame = ctk.CTkFrame(self.chat_frame, fg_color="transparent")
+        self.fun_sounds_panel_frame.grid(row=2, column=0, sticky="ew", padx=10, pady=(5, 10))
+        self.fun_sounds_panel_frame.grid_columnconfigure(0, weight=1)
+        
+        # Horizontal scrollable frame for sound buttons
+        self.fun_sounds_frame = ctk.CTkScrollableFrame(self.fun_sounds_panel_frame, fg_color="transparent", orientation="horizontal")
+        self.fun_sounds_frame.pack(fill="x", expand=True)
+        
+        # Load and create buttons for all fun/reaction sounds with icons
+        self.fun_sound_buttons = {}
+        fun_sounds = get_fun_sounds()
+        if fun_sounds:
+            for sound_info in fun_sounds:
+                category = sound_info['path'].parent.name
+                sound_name = sound_info['name']
+                
+                # Get icon for this sound
+                icon = self._get_sound_icon(sound_name)
+                
+                # Create button with icon only (no text label)
+                btn = ctk.CTkButton(
+                    self.fun_sounds_frame,
+                    text=icon,
+                    width=70,
+                    height=70,
+                    font=ctk.CTkFont(size=32),
+                    command=lambda sn=sound_name, cat=category: play_custom_sound(sn, cat)
+                )
+                btn.pack(side="left", padx=3, pady=5)
+                self.fun_sound_buttons[sound_name] = btn
+        else:
+            # Show placeholder if no fun sounds found
+            placeholder = ctk.CTkLabel(self.fun_sounds_frame, text="No fun sounds found", text_color="gray", font=ctk.CTkFont(size=9))
+            placeholder.pack(padx=10, pady=10)
+
+        # Emoji Panel (collapsible)
+        self.emoji_panel_frame = ctk.CTkFrame(self.chat_frame, fg_color="transparent")
+        self.emoji_panel_frame.grid(row=3, column=0, sticky="ew", padx=10, pady=(5, 10))
+        self.emoji_panel_frame.grid_columnconfigure(0, weight=1)
+        
+        # Horizontal scrollable frame for emoji buttons
+        self.emoji_frame = ctk.CTkScrollableFrame(self.emoji_panel_frame, fg_color="transparent", orientation="horizontal")
+        self.emoji_frame.pack(fill="x", expand=True)
+        
+        # Track emoji panel state
+        self.emoji_panel_visible = False
+        self.emoji_panel_frame.pack_forget()  # Hide initially
+        
+        # Create emoji buttons with better styling
+        emojis = "😊😂😍🥰😎👍👎✌️🙏🤝❤️💔💛💚💙🔥⚡✨🌟💫🎉🎊🎈🎁🎀😭😡😱😴🤔😶😬😲🙈🙉🙊🤤😪😷🤒🤕😵🤮🤢🤯🤠🥴😕😟☹️🙁😞😖😢😤😠😈👿💀☠️😻😸😹😺😼😽🙀😿😾🎭"
+        
+        for emoji in emojis:
+            emoji_btn = ctk.CTkButton(
+                self.emoji_frame,
+                text=emoji,
+                width=50,
+                height=50,
+                font=ctk.CTkFont(size=24),
+                fg_color="transparent",
+                border_width=0,
+                command=lambda e=emoji: self.insert_emoji_char(e)
+            )
+            emoji_btn.pack(side="left", padx=2, pady=4)
 
         # Start background receiver to listen for incoming calls
         self.start_background_receiver()
+
+    def on_separator_drag_start(self, event):
+        """Handle start of separator drag."""
+        self.drag_start_x = event.x_root
+        self.drag_start_width = self.sidebar_width
+
+    def on_separator_drag(self, event):
+        """Handle separator drag to resize sidebar."""
+        try:
+            # Calculate new width based on mouse movement
+            delta = event.x_root - self.drag_start_x
+            new_width = max(150, min(self.drag_start_width + delta, 600))  # Min 150px, max 600px
+            
+            if new_width != self.sidebar_width:
+                self.sidebar_width = new_width
+                # Update grid column configuration
+                self.grid_columnconfigure(0, minsize=self.sidebar_width)
+                self.sidebar.configure(width=self.sidebar_width)
+        except Exception as e:
+            print(f"Error resizing sidebar: {e}")
 
     def on_separator_drag_start(self, event):
         """Handle start of separator drag."""
@@ -219,6 +399,7 @@ class HexChatApp(ctk.CTk):
                 # Set callbacks first
                 set_text_message_callback(self.receive_msg_update, self.receive_msg_update_with_sender)
                 set_incoming_call_callback(self.show_incoming_call)
+                set_send_custom_sound_callback(self.send_custom_sound)
                 set_deafen_state(False)
                 
                 # Close old background stream if it exists
@@ -345,17 +526,25 @@ class HexChatApp(ctk.CTk):
             # Load chat history with this contact
             self.chat_box.configure(state="normal")
             history = load_history(target)
+            
+            from datetime import datetime
+            timestamp = datetime.now().isoformat()
+            time_str = format_timestamp(timestamp)
+            
             if history:
                 # Append call status to existing history
-                self.chat_box.insert("end", f"\n[CALLING] {target}...\n")
+                self.chat_box.insert("end", f"\n[{time_str}] 📞 CALLING {target}...\n")
             else:
-                self.chat_box.insert("end", f"[CALLING] {target}...\n")
+                self.chat_box.insert("end", f"[{time_str}] 📞 CALLING {target}...\n")
             
             self.chat_box.configure(state="disabled")
             self.chat_box.see("end")
             
             # Send call request to the target
             send_text_message("__CALL_REQUEST__", self.target_ip)
+            
+            # Play calling sound
+            sound_calling()
             
             self.connect_btn.configure(state="disabled", text="Calling...")
             
@@ -409,10 +598,16 @@ class HexChatApp(ctk.CTk):
             # Keep target_ip so user can call the same person again
             # self.target_ip = None
             self.chat_box.configure(state="normal")
-            self.chat_box.insert("end", "--- Disconnected ---\n")
+            from datetime import datetime
+            timestamp = datetime.now().isoformat()
+            time_str = format_timestamp(timestamp)
+            self.chat_box.insert("end", f"[{time_str}] 📴 Disconnected\n")
             self.chat_box.configure(state="disabled")
             self.connect_btn.configure(state="normal", text="Connect Voice/Chat")
             self.disconnect_btn.configure(state="disabled")
+            
+            # Play disconnected sound
+            sound_disconnected()
             
             # Restart background receiver to listen for new calls
             self.background_receiver_active = False  # Reset flag to allow restart
@@ -433,14 +628,17 @@ class HexChatApp(ctk.CTk):
                 
                 # Add to chat
                 self.chat_box.configure(state="normal")
-                self.chat_box.insert("end", f"[Call] Incoming call from {caller_ip}\n")
+                from datetime import datetime
+                timestamp = datetime.now().isoformat()
+                time_str = format_timestamp(timestamp)
+                self.chat_box.insert("end", f"[{time_str}] 📞 Incoming call from {caller_ip}\n")
                 self.chat_box.configure(state="disabled")
                 self.chat_box.see("end")
                 
-                # Create popup dialog for incoming call
-                self.show_call_popup(caller_ip)
+                # Play incoming call sound
+                sound_incoming()
                 
-                print(f"[Call] Incoming call from {caller_ip}")
+                print(f"📞 Incoming call from {caller_ip}")
         except Exception as e:
             print(f"Error showing incoming call: {e}")
             import traceback
@@ -771,24 +969,117 @@ class HexChatApp(ctk.CTk):
         set_deafen_state(self.is_deafened)
         print(f"Deafened: {self.is_deafened}")
 
+    def on_call_volume_change(self, value):
+        """Handle call volume slider change."""
+        volume = float(value) / 100.0
+        set_call_volume(volume)
+        print(f"Call volume: {volume * 100:.0f}%")
+
+    def on_message_incoming_volume_change(self, value):
+        """Handle incoming message volume slider change."""
+        volume = float(value) / 100.0
+        set_message_incoming_volume(volume)
+        print(f"Incoming message volume: {volume * 100:.0f}%")
+
+    def on_message_outgoing_volume_change(self, value):
+        """Handle outgoing message volume slider change."""
+        volume = float(value) / 100.0
+        set_message_outgoing_volume(volume)
+        print(f"Outgoing message volume: {volume * 100:.0f}%")
+
+    def create_or_switch_chat_tab(self, ip: str):
+        """Create a new chat tab for an IP or switch to existing one."""
+        if ip in self.chat_boxes:
+            # Tab already exists, switch to it
+            self.chat_tabview.set(self.chat_tabs[ip])
+            self.current_chat_ip = ip
+            self.chat_box = self.chat_boxes[ip]
+            print(f"[OK] Switched to chat with {ip}")
+        else:
+            # Create new tab for this IP
+            tab_name = f"💬 {ip}"
+            new_tab = self.chat_tabview.add(tab_name)
+            
+            # Create chat textbox for this tab
+            chat_box = ctk.CTkTextbox(new_tab, state="disabled")
+            chat_box.pack(side="left", fill="both", expand=True, padx=5, pady=5)
+            
+            # Create scrollbar
+            scrollbar = ctk.CTkScrollbar(new_tab, command=chat_box.yview)
+            scrollbar.pack(side="right", fill="y", padx=5, pady=5)
+            chat_box.configure(yscrollcommand=scrollbar.set)
+            
+            # Store references
+            self.chat_boxes[ip] = chat_box
+            self.chat_tabs[ip] = tab_name
+            self.current_chat_ip = ip
+            self.chat_box = chat_box
+            
+            # Update combo box with new contact
+            current_values = list(self.chat_ip_combo.cget("values"))
+            if ip not in current_values:
+                current_values.append(ip)
+                self.chat_ip_combo.configure(values=current_values)
+            
+            # Load previous history for this IP
+            self.load_previous_chat(ip)
+            print(f"[OK] Created new chat tab for {ip}")
+
+    def on_chat_contact_selected(self, selected_value):
+        """Handle selection from chat contact dropdown."""
+        if selected_value == "General":
+            # Switch to general tab
+            self.chat_tabview.set("💬 General")
+            self.current_chat_ip = None
+            self.chat_box = self.general_chat_box
+            print("[OK] Switched to general chat")
+        elif selected_value and selected_value != "Select contact...":
+            # Switch to specific contact tab
+            self.create_or_switch_chat_tab(selected_value)
+
     def send_msg(self, event=None):
         msg = self.msg_entry.get()
         if not msg: return
         
-        # Check if we have a target IP
-        target = self.target_ip
+        # Determine target IP - from dropdown or from active call
+        if self.current_chat_ip:
+            target = self.current_chat_ip
+        elif self.target_ip:
+            target = self.target_ip
+        else:
+            target = None
+        
         if not target:
             self.chat_box.configure(state="normal")
             self.chat_box.insert("end", "[ERROR] Please select a contact first\n")
             self.chat_box.configure(state="disabled")
             return
+        
+        # Ensure we have a tab for this contact if not general
+        if target != "General" and target not in self.chat_boxes:
+            self.create_or_switch_chat_tab(target)
 
-        # Update own UI with timestamp
+        # Update own UI with timestamp and date separator if needed
         from datetime import datetime
         timestamp = datetime.now().isoformat()
-        formatted_msg = get_formatted_message("You", msg, timestamp)
         
         self.chat_box.configure(state="normal")
+        
+        # Check if we need a date separator
+        history = load_history(target)
+        if history and len(history) > 0:
+            last_msg = history[-1]
+            prev_timestamp = last_msg.get('timestamp', '')
+            if prev_timestamp and needs_date_separator(prev_timestamp, timestamp):
+                date_header = format_date_header(timestamp)
+                self.chat_box.insert("end", f"\n--- {date_header} ---\n")
+        else:
+            # First message to this contact
+            date_header = format_date_header(timestamp)
+            if "Chat History" not in self.chat_box.get("1.0", "end"):
+                self.chat_box.insert("end", f"--- {date_header} ---\n")
+        
+        formatted_msg = get_formatted_message("You", msg, timestamp)
         self.chat_box.insert("end", f"{formatted_msg}\n")
         self.chat_box.configure(state="disabled")
         self.chat_box.see("end")
@@ -800,6 +1091,28 @@ class HexChatApp(ctk.CTk):
         send_text_message(msg, target)
         
         self.msg_entry.delete(0, "end")
+
+    def toggle_emoji_panel(self):
+        """Toggle visibility of emoji panel."""
+        if self.emoji_panel_visible:
+            self.emoji_panel_frame.pack_forget()
+            self.emoji_panel_visible = False
+        else:
+            self.emoji_panel_frame.grid(row=3, column=0, sticky="ew", padx=10, pady=(5, 10))
+            self.emoji_panel_visible = True
+
+    def insert_emoji_char(self, emoji: str):
+        """Insert emoji at cursor position in message entry."""
+        current_text = self.msg_entry.get()
+        insert_pos = self.msg_entry.index("insert")
+        new_text = current_text[:insert_pos] + emoji + current_text[insert_pos:]
+        
+        self.msg_entry.delete(0, "end")
+        self.msg_entry.insert(0, new_text)
+        
+        # Set cursor after inserted emoji
+        self.msg_entry.icursor(insert_pos + len(emoji))
+        self.msg_entry.focus()
 
     def receive_msg_update(self, message):
         # This function is called when a message arrives
@@ -828,6 +1141,9 @@ class HexChatApp(ctk.CTk):
                 self.connect_btn.configure(state="disabled", text="Connected!")
                 self.disconnect_btn.configure(state="normal")
                 
+                # Play connected sound
+                sound_connected()
+                
                 try:
                     # Now start sending audio since call was accepted
                     # Use the audio interface for input stream
@@ -855,8 +1171,14 @@ class HexChatApp(ctk.CTk):
         elif message == "__CALL_REJECT__":
             if self.call_state == "calling":
                 self.call_state = "idle"
-                self.chat_box.insert("end", "--- Call rejected ---\n")
+                from datetime import datetime
+                timestamp = datetime.now().isoformat()
+                time_str = format_timestamp(timestamp)
+                self.chat_box.insert("end", f"[{time_str}] ❌ Call rejected\n")
                 self.connect_btn.configure(state="normal", text="Connect Voice/Chat")
+                
+                # Play rejection sound
+                sound_rejected()
                 
                 # Clean up
                 cleanup_receiver()
@@ -870,12 +1192,25 @@ class HexChatApp(ctk.CTk):
         elif message == "__CALL_CANCEL__":
             if self.call_state == "ringing":
                 self.call_state = "idle"
-                self.chat_box.insert("end", "--- Call cancelled by friend ---\n")
+                from datetime import datetime
+                timestamp = datetime.now().isoformat()
+                time_str = format_timestamp(timestamp)
+                self.chat_box.insert("end", f"[{time_str}] ❌ Call cancelled by friend\n")
                 self.call_frame.pack_forget()
                 self.incoming_call_ip = None
+                
+                # Play cancelled sound
+                sound_cancelled()
         # Check for disconnection
         elif message == "__DISCONNECT__":
-            self.chat_box.insert("end", "--- Friend disconnected ---\n")
+            from datetime import datetime
+            timestamp = datetime.now().isoformat()
+            time_str = format_timestamp(timestamp)
+            self.chat_box.insert("end", f"[{time_str}] 📴 Friend disconnected\n")
+            
+            # Play disconnected sound
+            sound_disconnected()
+            
             # Auto-disconnect both ways
             if self.is_connected:
                 self.disconnect()
@@ -883,8 +1218,13 @@ class HexChatApp(ctk.CTk):
         else:
             from datetime import datetime
             timestamp = datetime.now().isoformat()
-            formatted_msg = get_formatted_message("Friend", message, timestamp)
-            self.chat_box.insert("end", f"{formatted_msg}\n")
+            
+            # Check if we need a date separator (compare with last message if available)
+            self._add_message_with_date_separator("Friend", message, timestamp)
+            
+            # Play message received sound
+            sound_message()
+            
             # Save incoming message to history
             if self.target_ip:
                 add_message(self.target_ip, "Friend", message)
@@ -894,50 +1234,186 @@ class HexChatApp(ctk.CTk):
 
     def receive_msg_update_with_sender(self, message, sender_ip):
         """Handle message with sender IP - saves even without active call."""
-        self.chat_box.configure(state="normal")
+        # Check for custom sound message
+        if message.startswith("__SOUND__") and message.endswith("__"):
+            # Extract sound name and category
+            # Format: __SOUND__sound_name__category__
+            try:
+                parts = message.split("__")
+                if len(parts) >= 4:
+                    sound_name = parts[2]
+                    category = parts[3]
+                    self.handle_custom_sound(sound_name, category, sender_ip)
+                    return
+            except Exception as e:
+                print(f"[WARNING] Error parsing custom sound message: {e}")
+                return
         
-        # Check for incoming call request
-        if message == "__CALL_REQUEST__":
-            # Call request with sender IP - handled by callback
-            pass
         # Check for system messages
-        elif message in ["__CALL_ACCEPT__", "__CALL_REJECT__", "__CALL_CANCEL__", "__DISCONNECT__"]:
+        if message in ["__CALL_REQUEST__", "__CALL_ACCEPT__", "__CALL_REJECT__", "__CALL_CANCEL__", "__DISCONNECT__"]:
+            # System messages use general chat box
+            self.general_chat_box.configure(state="normal")
             # These are already handled by receive_msg_update
             self.receive_msg_update(message)
             return
-        # Regular text message - save regardless of connection state
-        else:
-            from datetime import datetime
-            timestamp = datetime.now().isoformat()
-            formatted_msg = get_formatted_message("Friend", message, timestamp)
-            self.chat_box.insert("end", f"{formatted_msg}\n")
-            # Always save message to history using sender IP
-            add_message(sender_ip, "Friend", message)
-            # Update target IP if not set (for text-only conversations)
-            if not self.target_ip:
-                self.target_ip = sender_ip
         
-        self.chat_box.configure(state="disabled")
-        self.chat_box.see("end")
+        # Regular text message - route to sender's chat tab
+        # Create/switch to chat tab for this sender
+        if sender_ip not in self.chat_boxes:
+            self.create_or_switch_chat_tab(sender_ip)
+        
+        # Get the appropriate chat box for this sender
+        chat_box = self.chat_boxes[sender_ip]
+        chat_box.configure(state="normal")
+        
+        from datetime import datetime
+        timestamp = datetime.now().isoformat()
+        
+        # Add message with date separator if needed
+        self._add_message_with_date_separator_to_box("Friend", message, timestamp, chat_box, sender_ip)
+        
+        # Play message received sound
+        sound_message()
+        
+        # Always save message to history using sender IP
+        add_message(sender_ip, "Friend", message)
+        # Update target IP if not set (for text-only conversations)
+        if not self.target_ip:
+            self.target_ip = sender_ip
+        
+        chat_box.configure(state="disabled")
+        chat_box.see("end")
+
+    def _add_message_with_date_separator(self, sender: str, message: str, timestamp: str):
+        """
+        Add a message to current chat box with automatic date separator if date changed.
+        
+        Args:
+            sender: Message sender name
+            message: Message text
+            timestamp: ISO timestamp string
+        """
+        target = self.current_chat_ip or self.target_ip
+        self._add_message_with_date_separator_to_box(sender, message, timestamp, self.chat_box, target)
+
+    def _get_sound_icon(self, sound_name: str) -> str:
+        """
+        Get emoji icon for a sound based on sound name.
+        Returns emoji if matched, otherwise returns default speaker icon.
+        
+        Args:
+            sound_name: Name of the sound file
+            
+        Returns:
+            str: Emoji icon
+        """
+        # Sound icon mapping
+        icon_map = {
+            'boing': '💫',
+            'squeaky': '🐭',
+            'drums': '🥁',
+            'cartoon-laugh': '😂',
+            'crowd-laugh': '🤣',
+            'sad-trombone': '🎺',
+            'disappointed-trombone': '😢',
+        }
+        
+        # Get icon from map or return default speaker icon
+        return icon_map.get(sound_name, '🔊')
+
+    def _add_message_with_date_separator_to_box(self, sender: str, message: str, timestamp: str, chat_box, contact_ip):
+        """
+        Add a message to a specific chat box with automatic date separator if date changed.
+        
+        Args:
+            sender: Message sender name
+            message: Message text
+            timestamp: ISO timestamp string
+            chat_box: The textbox to add message to
+            contact_ip: The contact IP for history lookup
+        """
+        # Get the last message's timestamp from the chat box if available
+        try:
+            # Get all content from chat box to find last timestamp
+            content = chat_box.get("1.0", "end")
+            lines = content.strip().split("\n")
+            
+            # Check if we need a date separator
+            need_separator = True
+            if lines:
+                # Look for the last actual message (skip separators and empty lines)
+                for line in reversed(lines):
+                    if line.strip() and not line.startswith("---"):
+                        # Found a message line, extract timestamp
+                        if "[" in line and "]" in line:
+                            # This looks like a formatted message, but we need to check dates
+                            curr_date = format_date_header(timestamp)
+                            # Conservatively add separator if content exists
+                            if "Chat History" not in content and "End of History" not in content:
+                                # Try to find a previous message with timestamp in storage
+                                if contact_ip:
+                                    history = load_history(contact_ip)
+                                    if history and len(history) > 0:
+                                        last_msg = history[-1]
+                                        prev_timestamp = last_msg.get('timestamp', '')
+                                        if prev_timestamp and needs_date_separator(prev_timestamp, timestamp):
+                                            need_separator = True
+                                        else:
+                                            need_separator = False
+                        break
+            
+            # Add date separator if needed
+            if need_separator and contact_ip:
+                history = load_history(contact_ip)
+                if history and len(history) > 0:
+                    last_msg = history[-1]
+                    prev_timestamp = last_msg.get('timestamp', '')
+                    if prev_timestamp and needs_date_separator(prev_timestamp, timestamp):
+                        date_header = format_date_header(timestamp)
+                        chat_box.insert("end", f"\n--- {date_header} ---\n")
+        except Exception:
+            pass  # If anything goes wrong, just add the message
+        
+        # Add the message
+        formatted_msg = get_formatted_message(sender, message, timestamp)
+        chat_box.insert("end", f"{formatted_msg}\n")
 
     def load_previous_chat(self, contact_ip: str):
-        """Load and display previous chat history with a contact."""
+        """Load and display previous chat history with a contact (with date separators like WhatsApp/Discord)."""
         try:
+            # Get the chat box for this contact
+            if contact_ip not in self.chat_boxes:
+                return
+            
+            chat_box = self.chat_boxes[contact_ip]
+            
             history = load_history(contact_ip)
             if history:
-                self.chat_box.configure(state="normal")
-                self.chat_box.insert("end", f"=== Chat History with {contact_ip} ===\n")
+                chat_box.configure(state="normal")
+                chat_box.insert("end", f"=== Chat History with {contact_ip} ===\n")
                 
-                # Show last 50 messages with timestamps
-                for msg in history[-50:]:
+                # Show last 50 messages with date separators
+                messages_to_show = history[-50:]
+                prev_date = None
+                
+                for msg in messages_to_show:
                     sender = msg.get('sender', 'Unknown')
                     text = msg.get('message', '')
                     timestamp = msg.get('timestamp', '')
+                    
+                    # Check if we need a date separator
+                    curr_date = format_date_header(timestamp)
+                    if curr_date != prev_date:
+                        # Add date separator
+                        chat_box.insert("end", f"\n--- {curr_date} ---\n")
+                        prev_date = curr_date
+                    
+                    # Add the message with time only
                     formatted_msg = get_formatted_message(sender, text, timestamp)
-                    self.chat_box.insert("end", f"{formatted_msg}\n")
+                    chat_box.insert("end", f"{formatted_msg}\n")
                 
-                self.chat_box.insert("end", "=== End of History ===\n\n")
-                self.chat_box.configure(state="disabled")
+                chat_box.insert("end", "=== End of History ===\n\n")
+                chat_box.configure(state="disabled")
                 self.chat_box.see("end")
         except Exception as e:
             print(f"[ERROR] Could not load previous chat: {e}")
@@ -1269,6 +1745,86 @@ class HexChatApp(ctk.CTk):
             print(f"Error during window close: {e}")
             # Force close if cleanup fails
             self.destroy()
+
+    def send_custom_sound(self, sound_name: str, category: str):
+        """
+        Send a custom sound to the remote peer and display in chat.
+        
+        Args:
+            sound_name: Name of the sound file (without extension)
+            category: Category of the sound ('fun' or 'reactions')
+        """
+        try:
+            # Determine target IP
+            if self.current_chat_ip:
+                target = self.current_chat_ip
+            elif self.target_ip:
+                target = self.target_ip
+            else:
+                print("[WARNING] No active connection to send sound")
+                return
+            
+            # Create special message format for custom sounds
+            sound_message = f"__SOUND__{sound_name}__{category}__"
+            
+            # Send to target
+            send_text_message(sound_message, target)
+            
+            # Display in our chat that we sent it
+            self.chat_box.configure(state="normal")
+            
+            from datetime import datetime
+            timestamp = datetime.now().isoformat()
+            timestamp_str = datetime.fromisoformat(timestamp).strftime("%H:%M:%S")
+            
+            # Get clean display name
+            display_name = sound_name.replace('-', ' ').title()
+            
+            # Add sound notification to chat
+            self.chat_box.insert("end", f"[{timestamp_str}] 🎵 You sent sound: {display_name}\n", "system")
+            self.chat_box.configure(state="disabled")
+            
+            print(f"[OK] Sent sound '{sound_name}' to {target}")
+        except Exception as e:
+            print(f"[ERROR] Could not send custom sound: {e}")
+
+    def handle_custom_sound(self, sound_name: str, category: str, sender_ip: str = None):
+        """
+        Handle receiving and displaying a custom sound notification.
+        
+        Args:
+            sound_name: Name of the sound that was sent
+            category: Category of the sound
+            sender_ip: IP of the sender (for routing to correct chat tab)
+        """
+        try:
+            # Play the sound locally
+            play_custom_sound(sound_name, category)
+            
+            # Get clean display name
+            display_name = sound_name.replace('-', ' ').title()
+            
+            # Display in chat
+            if sender_ip and sender_ip in self.chat_boxes:
+                chat_box = self.chat_boxes[sender_ip]
+            else:
+                chat_box = self.chat_box
+            
+            chat_box.configure(state="normal")
+            
+            from datetime import datetime
+            timestamp = datetime.now().isoformat()
+            timestamp_str = datetime.fromisoformat(timestamp).strftime("%H:%M:%S")
+            
+            # Add sound notification to chat
+            chat_box.insert("end", f"[{timestamp_str}] 🎵 Friend sent sound: {display_name}\n", "system")
+            
+            chat_box.configure(state="disabled")
+            chat_box.see("end")
+            
+            print(f"[OK] Received sound: {display_name} from {sender_ip}")
+        except Exception as e:
+            print(f"[ERROR] Could not handle custom sound: {e}")
 
 if __name__ == "__main__":
     app = HexChatApp()

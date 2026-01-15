@@ -25,9 +25,11 @@ The application has been successfully built with encryption support.
 ### UI Features
 - ✅ CustomTkinter-based dark theme GUI
 - ✅ Sidebar controls (device selection, IP entry, connect button)
-- ✅ Chat history display
+- ✅ Chat history display with **date/time organization** (like WhatsApp/Discord)
 - ✅ Real-time message input
 - ✅ Voice controls (mute, deafen switches)
+- ✅ **Date Separators** in chat (Today, Yesterday, Month Date Year)
+- ✅ **Time Stamps** on each message (HH:MM:SS format)
 
 ## Architecture
 

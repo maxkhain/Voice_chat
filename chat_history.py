@@ -171,24 +171,64 @@ def clear_history(contact_ip: str) -> bool:
 
 def format_timestamp(iso_timestamp: str) -> str:
     """
-    Format ISO timestamp to readable format.
+    Format ISO timestamp to readable format (time only).
     
     Args:
         iso_timestamp: ISO format timestamp string
         
     Returns:
-        str: Formatted timestamp (e.g., "14:30:45" or "Jan 12 14:30")
+        str: Formatted timestamp (e.g., "14:30:45")
     """
     try:
         dt = datetime.fromisoformat(iso_timestamp)
-        # Return time only if today, date + time if older
-        today = datetime.now().date()
-        if dt.date() == today:
-            return dt.strftime("%H:%M:%S")
-        else:
-            return dt.strftime("%b %d %H:%M")
+        # Return time only (HH:MM:SS)
+        return dt.strftime("%H:%M:%S")
     except Exception:
         return iso_timestamp
+
+
+def format_date_header(iso_timestamp: str) -> str:
+    """
+    Format ISO timestamp to date header (like WhatsApp/Discord).
+    
+    Args:
+        iso_timestamp: ISO format timestamp string
+        
+    Returns:
+        str: Formatted date header (e.g., "Today", "Yesterday", "January 12, 2026")
+    """
+    try:
+        dt = datetime.fromisoformat(iso_timestamp)
+        today = datetime.now().date()
+        yesterday = today - __import__('datetime').timedelta(days=1)
+        
+        if dt.date() == today:
+            return "Today"
+        elif dt.date() == yesterday:
+            return "Yesterday"
+        else:
+            return dt.strftime("%B %d, %Y")  # e.g., "January 12, 2026"
+    except Exception:
+        return "Unknown date"
+
+
+def needs_date_separator(prev_timestamp: str, curr_timestamp: str) -> bool:
+    """
+    Check if a date separator should be inserted between two messages.
+    
+    Args:
+        prev_timestamp: Previous message's ISO timestamp
+        curr_timestamp: Current message's ISO timestamp
+        
+    Returns:
+        bool: True if messages are on different dates
+    """
+    try:
+        prev_dt = datetime.fromisoformat(prev_timestamp)
+        curr_dt = datetime.fromisoformat(curr_timestamp)
+        return prev_dt.date() != curr_dt.date()
+    except Exception:
+        return False
 
 
 def export_history(contact_ip: str, format: str = "text") -> str:
@@ -247,14 +287,14 @@ def get_history_size(contact_ip: str) -> int:
 
 def display_history(contact_ip: str, max_messages: int = None) -> str:
     """
-    Get formatted history for display.
+    Get formatted history for display with date separators (like WhatsApp/Discord).
     
     Args:
         contact_ip: IP address of the contact
         max_messages: Maximum messages to return (None = all)
         
     Returns:
-        str: Formatted history text
+        str: Formatted history text with date separators
     """
     messages = load_history(contact_ip)
     
@@ -262,11 +302,23 @@ def display_history(contact_ip: str, max_messages: int = None) -> str:
         messages = messages[-max_messages:]
     
     lines = []
+    prev_date = None
+    
     for msg in messages:
-        timestamp = format_timestamp(msg.get('timestamp', ''))
+        timestamp = msg.get('timestamp', '')
         sender = msg.get('sender', 'Unknown')
         text = msg.get('message', '')
-        lines.append(f"[{timestamp}] {sender}: {text}")
+        
+        # Check if we need a date separator
+        curr_date = format_date_header(timestamp)
+        if curr_date != prev_date:
+            # Add date separator
+            lines.append(f"\n--- {curr_date} ---")
+            prev_date = curr_date
+        
+        # Format the message with time only
+        time_str = format_timestamp(timestamp)
+        lines.append(f"[{time_str}] {sender}: {text}")
     
     return "\n".join(lines) if lines else "(No messages)"
 
