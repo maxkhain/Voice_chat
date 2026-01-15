@@ -14,6 +14,9 @@ sock = None
 # Global state tracking
 _RECV_QUEUE_DEPTH = 0
 
+# Stop flag for receiver thread
+_SHOULD_STOP = False
+
 # Message type constants
 MESSAGE_TYPE_AUDIO = b'\x00'
 MESSAGE_TYPE_TEXT = b'\x01'
@@ -93,14 +96,14 @@ def receive_audio(output_stream):
     Args:
         output_stream: PyAudio output stream (speakers)
     """
-    global _RECV_QUEUE_DEPTH
+    global _RECV_QUEUE_DEPTH, _SHOULD_STOP
     
     # Initialize encryption
     initialize_encryption()
     
     sock = get_receiver_socket()
     
-    while True:
+    while not _SHOULD_STOP:
         try:
             # Use select() to check if data is ready
             ready = select.select([sock], [], [], 0.01)
@@ -191,9 +194,22 @@ def receive_audio(output_stream):
                 break
 
 
+def reset_stop_flag():
+    """Reset the stop flag to allow receiver to run again."""
+    global _SHOULD_STOP
+    _SHOULD_STOP = False
+
+
+def stop_receiver():
+    """Signal the receiver thread to stop."""
+    global _SHOULD_STOP
+    _SHOULD_STOP = True
+
+
 def cleanup_receiver():
-    """Clean up receiver socket."""
-    global sock
+    """Clean up receiver socket and stop the receiver thread."""
+    global sock, _SHOULD_STOP
+    _SHOULD_STOP = True
     if sock:
         try:
             sock.close()

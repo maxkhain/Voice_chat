@@ -15,6 +15,7 @@ sock = None
 _LAST_VISUAL = 0.0
 _SEND_QUEUE_DEPTH = 0
 _RECV_QUEUE_DEPTH = 0
+_IS_MUTED = False  # Track mute state
 
 # For visual feedback
 VISUAL_THROTTLE = 0.1
@@ -65,6 +66,19 @@ def send_text_message(message, target_ip):
         print(f"Error sending text message: {e}")
 
 
+def set_mute_state(is_muted):
+    """Set the mute state for microphone."""
+    global _IS_MUTED
+    _IS_MUTED = is_muted
+    print(f"Mute state: {'ON' if is_muted else 'OFF'}")
+
+
+def reset_stop_flag():
+    """Reset the stop flag to allow sender to run again."""
+    global _SHOULD_STOP
+    _SHOULD_STOP = False
+
+
 def send_audio(input_stream, output_stream, target_ip):
     """
     Read microphone, encrypt, and send audio immediately for smooth, natural audio.
@@ -74,7 +88,7 @@ def send_audio(input_stream, output_stream, target_ip):
         output_stream: PyAudio output stream (for monitoring if needed)
         target_ip: Target IP address to send audio to
     """
-    global _LAST_VISUAL, _SEND_QUEUE_DEPTH
+    global _LAST_VISUAL, _SEND_QUEUE_DEPTH, _IS_MUTED
     
     # Initialize encryption
     initialize_encryption()
@@ -88,6 +102,10 @@ def send_audio(input_stream, output_stream, target_ip):
         try:
             # Read one frame from mic
             data = input_stream.read(CHUNK, exception_on_overflow=False)
+            
+            # If muted, send silence instead of actual audio
+            if _IS_MUTED:
+                data = b'\x00' * len(data)
             
             # Apply noise cancellation (disabled by default for smooth audio)
             data = apply_noise_cancellation(data)
@@ -118,9 +136,16 @@ def send_audio(input_stream, output_stream, target_ip):
             break
 
 
+def stop_sender():
+    """Signal the sender thread to stop."""
+    global _SHOULD_STOP
+    _SHOULD_STOP = True
+
+
 def cleanup_sender():
-    """Clean up sender socket."""
-    global sock
+    """Clean up sender socket and stop the sender thread."""
+    global sock, _SHOULD_STOP
+    _SHOULD_STOP = True
     if sock:
         try:
             sock.close()

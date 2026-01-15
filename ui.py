@@ -10,8 +10,8 @@ from audio_io import (
     close_stream,
     close_audio_interface
 )
-from audio_sender import send_audio, cleanup_sender, send_text_message
-from audio_receiver import receive_audio, cleanup_receiver, set_text_message_callback, set_deafen_state, set_incoming_call_callback, reset_receiver_socket
+from audio_sender import send_audio, cleanup_sender, send_text_message, set_mute_state, stop_sender, reset_stop_flag as reset_sender_stop_flag
+from audio_receiver import receive_audio, cleanup_receiver, set_text_message_callback, set_deafen_state, set_incoming_call_callback, reset_receiver_socket, stop_receiver, reset_stop_flag as reset_receiver_stop_flag
 from audio_filter import reset_noise_profile
 from connection_cache import (
     get_last_connection,
@@ -173,53 +173,6 @@ class HexChatApp(ctk.CTk):
         self.deafen_btn = ctk.CTkSwitch(self.sidebar, text="Deafen Audio", command=self.toggle_deafen)
         self.deafen_btn.pack(pady=5, padx=10)
 
-        # Sound Effects Volume Control
-        self.sound_label = ctk.CTkLabel(self.sidebar, text="🔊 Sound Effects", font=ctk.CTkFont(size=12, weight="bold"))
-        self.sound_label.pack(pady=(20, 10), padx=10)
-        
-        # Call Volume Slider
-        self.call_vol_label = ctk.CTkLabel(self.sidebar, text="Call Volume", font=ctk.CTkFont(size=10))
-        self.call_vol_label.pack(pady=(5, 2), padx=10)
-        
-        self.call_vol_slider = ctk.CTkSlider(
-            self.sidebar,
-            from_=0,
-            to=100,
-            number_of_steps=20,
-            command=self.on_call_volume_change,
-            width=170
-        )
-        self.call_vol_slider.set(get_call_volume() * 100)
-        self.call_vol_slider.pack(pady=(0, 10), padx=10)
-        
-        # Message Volume Sliders - Separate for incoming and outgoing
-        self.msg_in_vol_label = ctk.CTkLabel(self.sidebar, text="📥 Received Message Volume", font=ctk.CTkFont(size=9))
-        self.msg_in_vol_label.pack(pady=(5, 2), padx=10)
-        
-        self.msg_in_vol_slider = ctk.CTkSlider(
-            self.sidebar,
-            from_=0,
-            to=100,
-            number_of_steps=20,
-            command=self.on_message_incoming_volume_change,
-            width=170
-        )
-        self.msg_in_vol_slider.set(get_message_incoming_volume() * 100)
-        self.msg_in_vol_slider.pack(pady=(0, 5), padx=10)
-        
-        self.msg_out_vol_label = ctk.CTkLabel(self.sidebar, text="📤 Sent Message Volume", font=ctk.CTkFont(size=9))
-        self.msg_out_vol_label.pack(pady=(5, 2), padx=10)
-        
-        self.msg_out_vol_slider = ctk.CTkSlider(
-            self.sidebar,
-            from_=0,
-            to=100,
-            number_of_steps=20,
-            command=self.on_message_outgoing_volume_change,
-            width=170
-        )
-        self.msg_out_vol_slider.set(get_message_outgoing_volume() * 100)
-        self.msg_out_vol_slider.pack(pady=(0, 10), padx=10)
         self.chat_frame = ctk.CTkFrame(self, corner_radius=0, fg_color="transparent")
         self.chat_frame.grid(row=0, column=2, sticky="nsew")
         
@@ -520,6 +473,10 @@ class HexChatApp(ctk.CTk):
 
     def connect(self):
         """Initiate a voice call to the target IP."""
+        # Reset stop flags to allow audio threads to run
+        reset_receiver_stop_flag()
+        reset_sender_stop_flag()
+        
         # Prevent multiple simultaneous calls
         if self.call_state == "calling" or self.is_connected:
             print("[!] Already in a call or connecting")
@@ -872,6 +829,10 @@ class HexChatApp(ctk.CTk):
     def accept_call(self):
         """Accept incoming call request."""
         try:
+            # Reset stop flags to allow audio threads to run
+            reset_receiver_stop_flag()
+            reset_sender_stop_flag()
+            
             if not self.incoming_call_ip:
                 return
             
@@ -979,6 +940,7 @@ class HexChatApp(ctk.CTk):
 
     def toggle_mute(self):
         self.is_muted = self.mute_btn.get()
+        set_mute_state(self.is_muted)
         print(f"Muted: {self.is_muted}")
 
     def toggle_deafen(self):
@@ -1470,23 +1432,27 @@ class HexChatApp(ctk.CTk):
             # Create settings window
             settings_window = ctk.CTkToplevel(self)
             settings_window.title("Settings")
-            settings_window.geometry("450x350")
+            settings_window.geometry("450x700")
             settings_window.resizable(False, False)
             settings_window.transient(self)
             
+            # Create scrollable frame for all settings
+            scroll_frame = ctk.CTkScrollableFrame(settings_window)
+            scroll_frame.pack(fill="both", expand=True, padx=10, pady=10)
+            
             # Title
             title_label = ctk.CTkLabel(
-                settings_window,
+                scroll_frame,
                 text="Audio Settings",
                 font=ctk.CTkFont(size=16, weight="bold")
             )
-            title_label.pack(pady=15, padx=20)
+            title_label.pack(pady=15)
             
             # Get audio interface for device enumeration
             temp_interface = get_audio_interface()
             
             # Microphone Section
-            mic_frame = ctk.CTkFrame(settings_window)
+            mic_frame = ctk.CTkFrame(scroll_frame)
             mic_frame.pack(pady=10, padx=20, fill="x")
             
             mic_label = ctk.CTkLabel(mic_frame, text="Microphone:", font=ctk.CTkFont(size=12, weight="bold"))
@@ -1516,7 +1482,7 @@ class HexChatApp(ctk.CTk):
                     selected_mic_idx = devices[0][0]
             
             # Speaker Section
-            speaker_frame = ctk.CTkFrame(settings_window)
+            speaker_frame = ctk.CTkFrame(scroll_frame)
             speaker_frame.pack(pady=10, padx=20, fill="x")
             
             speaker_label = ctk.CTkLabel(speaker_frame, text="Speaker:", font=ctk.CTkFont(size=12, weight="bold"))
@@ -1545,9 +1511,59 @@ class HexChatApp(ctk.CTk):
                     speaker_combo.set(device_names[0])
                     selected_speaker_idx = output_devices[0][0]
             
+            # Volume Controls Section
+            volume_label = ctk.CTkLabel(
+                scroll_frame,
+                text="🔊 Volume Controls",
+                font=ctk.CTkFont(size=12, weight="bold")
+            )
+            volume_label.pack(pady=(20, 10), padx=20, anchor="w")
+            
+            # Call Volume
+            call_vol_label = ctk.CTkLabel(scroll_frame, text="Call Volume:", font=ctk.CTkFont(size=10))
+            call_vol_label.pack(pady=(5, 2), padx=20, anchor="w")
+            
+            call_vol_slider = ctk.CTkSlider(
+                scroll_frame,
+                from_=0,
+                to=100,
+                number_of_steps=20,
+                command=self.on_call_volume_change
+            )
+            call_vol_slider.set(get_call_volume() * 100)
+            call_vol_slider.pack(pady=(0, 10), padx=20, fill="x")
+            
+            # Incoming Message Volume
+            msg_in_vol_label = ctk.CTkLabel(scroll_frame, text="📥 Received Message Volume:", font=ctk.CTkFont(size=10))
+            msg_in_vol_label.pack(pady=(5, 2), padx=20, anchor="w")
+            
+            msg_in_vol_slider = ctk.CTkSlider(
+                scroll_frame,
+                from_=0,
+                to=100,
+                number_of_steps=20,
+                command=self.on_message_incoming_volume_change
+            )
+            msg_in_vol_slider.set(get_message_incoming_volume() * 100)
+            msg_in_vol_slider.pack(pady=(0, 10), padx=20, fill="x")
+            
+            # Outgoing Message Volume
+            msg_out_vol_label = ctk.CTkLabel(scroll_frame, text="📤 Sent Message Volume:", font=ctk.CTkFont(size=10))
+            msg_out_vol_label.pack(pady=(5, 2), padx=20, anchor="w")
+            
+            msg_out_vol_slider = ctk.CTkSlider(
+                scroll_frame,
+                from_=0,
+                to=100,
+                number_of_steps=20,
+                command=self.on_message_outgoing_volume_change
+            )
+            msg_out_vol_slider.set(get_message_outgoing_volume() * 100)
+            msg_out_vol_slider.pack(pady=(0, 10), padx=20, fill="x")
+            
             # Button Frame
             button_frame = ctk.CTkFrame(settings_window, fg_color="transparent")
-            button_frame.pack(pady=20, padx=20, fill="x")
+            button_frame.pack(pady=15, padx=20, fill="x")
             
             def save_settings():
                 """Save selected audio settings."""
@@ -1732,6 +1748,12 @@ class HexChatApp(ctk.CTk):
     def on_closing(self):
         """Handle window close event - disconnect from call and clean up."""
         try:
+            print("[APP] Closing application, cleaning up audio threads...")
+            
+            # Signal all audio threads to stop
+            stop_sender()
+            stop_receiver()
+            
             # Send disconnect message to the other user in any active state
             if self.target_ip and self.call_state != "idle":
                 try:
@@ -1760,13 +1782,37 @@ class HexChatApp(ctk.CTk):
                 except:
                     pass
             
-            # Clean up background receiver
+            # Clean up background receiver and sender
             cleanup_receiver()
+            cleanup_sender()
             
+            # Close audio streams if they exist
+            try:
+                if hasattr(self, 'background_output_stream') and self.background_output_stream:
+                    close_stream(self.background_output_stream)
+            except Exception:
+                pass
+            
+            try:
+                if hasattr(self, 'input_stream') and self.input_stream:
+                    close_stream(self.input_stream)
+            except Exception:
+                pass
+            
+            # Close audio interface if it exists
+            try:
+                if hasattr(self, 'audio_interface') and self.audio_interface:
+                    close_audio_interface(self.audio_interface)
+            except Exception:
+                pass
+            
+            print("[APP] Cleanup complete, closing window")
             # Destroy the main window
             self.destroy()
         except Exception as e:
             print(f"Error during window close: {e}")
+            import traceback
+            traceback.print_exc()
             # Force close if cleanup fails
             self.destroy()
 
