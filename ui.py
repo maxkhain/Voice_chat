@@ -638,6 +638,9 @@ class HexChatApp(ctk.CTk):
                 # Play incoming call sound
                 sound_incoming()
                 
+                # Show popup for incoming call
+                self.show_call_popup(caller_ip)
+                
                 print(f"📞 Incoming call from {caller_ip}")
         except Exception as e:
             print(f"Error showing incoming call: {e}")
