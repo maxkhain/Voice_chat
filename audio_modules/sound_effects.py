@@ -410,22 +410,18 @@ def get_fun_sounds():
 
 def play_custom_sound(sound_name: str, category: str = 'fun'):
     """
-    Play a custom fun/reaction sound during a call and send to remote peer.
+    Play a custom fun/reaction sound during a call.
+    
+    This is called ONLY for LOCAL playback when receiving a sound from remote peer.
+    For sending sounds, use send_text_message with __SOUND__ prefix instead.
     
     Args:
-        sound_name: Name of the sound (without extension)
+        sound_name: Name of the sound file (without extension)
         category: Category ('fun' or 'reactions')
     """
     sound_file = SOUNDS_DIR / category / f"{sound_name}.wav"
     if sound_file.exists():
         play_sound(sound_file, volume=0.7)
-        
-        # Send sound to remote peer via callback
-        if _send_custom_sound_callback:
-            try:
-                _send_custom_sound_callback(sound_name, category)
-            except Exception as e:
-                print(f"[WARNING] Could not send custom sound to peer: {e}")
     else:
         print(f"[WARNING] Sound not found: {sound_name}")
 

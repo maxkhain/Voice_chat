@@ -3,7 +3,7 @@ Main application entry point for Local Voice Chat.
 
 Launches the GUI application.
 """
-from ui import HexChatApp
+from ui_modules.ui import HexChatApp
 
 
 if __name__ == "__main__":

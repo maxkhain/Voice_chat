@@ -2,7 +2,7 @@
 Audio input and output stream management.
 """
 import pyaudio
-from audio_config import CHANNELS, RATE, FORMAT, CHUNK
+from audio_modules.audio_config import CHANNELS, RATE, FORMAT, CHUNK
 
 
 def get_audio_interface():

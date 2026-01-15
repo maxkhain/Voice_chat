@@ -15,7 +15,7 @@ Available filters:
 Use FILTER_ENABLED dict to toggle filters on/off individually.
 """
 import numpy as np
-from audio_config import (
+from audio_modules.audio_config import (
     RATE,
     CHUNK,
     FILTER_ENABLED,

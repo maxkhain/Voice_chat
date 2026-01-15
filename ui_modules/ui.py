@@ -1,7 +1,7 @@
 # ui.py
 import customtkinter as ctk
 import threading
-from audio_io import (
+from audio_modules.audio_io import (
     get_audio_interface,
     get_input_devices,
     get_output_devices,
@@ -10,19 +10,19 @@ from audio_io import (
     close_stream,
     close_audio_interface
 )
-from audio_sender import send_audio, cleanup_sender, send_text_message
-from audio_receiver import receive_audio, cleanup_receiver, set_text_message_callback, set_deafen_state, set_incoming_call_callback, reset_receiver_socket
-from audio_filter import reset_noise_profile
-from connection_cache import (
+from audio_modules.audio_sender import send_audio, cleanup_sender, send_text_message
+from audio_modules.audio_receiver import receive_audio, cleanup_receiver, set_text_message_callback, set_deafen_state, set_incoming_call_callback, reset_receiver_socket
+from audio_modules.audio_filter import reset_noise_profile
+from utils.connection_cache import (
     get_last_connection,
     get_last_microphone,
     get_last_speaker,
     has_cached_connection,
     save_cache,
 )
-from chat_history import add_message, load_history, display_history, clear_history, get_formatted_message, format_timestamp, format_date_header, needs_date_separator
-from network_scanner import scan_network_async, format_device_list, extract_ip_from_formatted
-from contacts import (
+from config.chat_history import add_message, load_history, display_history, clear_history, get_formatted_message, format_timestamp, format_date_header, needs_date_separator
+from utils.network_scanner import scan_network_async, format_device_list, extract_ip_from_formatted
+from config.contacts import (
     add_contact,
     get_all_contacts,
     get_contacts_display_list,
@@ -30,8 +30,8 @@ from contacts import (
     get_contact_name,
     search_contacts
 )
-from scan_cache import save_scan_results, load_scan_results
-from sound_effects import sound_calling, sound_incoming, sound_connected, sound_rejected, sound_disconnected, sound_message, sound_cancelled, stop_all_sounds, set_call_volume, set_message_incoming_volume, set_message_outgoing_volume, get_call_volume, get_message_incoming_volume, get_message_outgoing_volume, get_fun_sounds, play_custom_sound, set_send_custom_sound_callback
+from utils.scan_cache import save_scan_results, load_scan_results
+from audio_modules.sound_effects import sound_calling, sound_incoming, sound_connected, sound_rejected, sound_disconnected, sound_message, sound_cancelled, stop_all_sounds, set_call_volume, set_message_incoming_volume, set_message_outgoing_volume, get_call_volume, get_message_incoming_volume, get_message_outgoing_volume, get_fun_sounds, play_custom_sound, set_send_custom_sound_callback
 
 
 # --- APPEARANCE ---
@@ -168,54 +168,6 @@ class HexChatApp(ctk.CTk):
         
         self.deafen_btn = ctk.CTkSwitch(self.sidebar, text="Deafen Audio", command=self.toggle_deafen)
         self.deafen_btn.pack(pady=5, padx=10)
-
-        # Sound Effects Volume Control
-        self.sound_label = ctk.CTkLabel(self.sidebar, text="🔊 Sound Effects", font=ctk.CTkFont(size=12, weight="bold"))
-        self.sound_label.pack(pady=(20, 10), padx=10)
-        
-        # Call Volume Slider
-        self.call_vol_label = ctk.CTkLabel(self.sidebar, text="Call Volume", font=ctk.CTkFont(size=10))
-        self.call_vol_label.pack(pady=(5, 2), padx=10)
-        
-        self.call_vol_slider = ctk.CTkSlider(
-            self.sidebar,
-            from_=0,
-            to=100,
-            number_of_steps=20,
-            command=self.on_call_volume_change,
-            width=170
-        )
-        self.call_vol_slider.set(get_call_volume() * 100)
-        self.call_vol_slider.pack(pady=(0, 10), padx=10)
-        
-        # Message Volume Sliders - Separate for incoming and outgoing
-        self.msg_in_vol_label = ctk.CTkLabel(self.sidebar, text="📥 Received Message Volume", font=ctk.CTkFont(size=9))
-        self.msg_in_vol_label.pack(pady=(5, 2), padx=10)
-        
-        self.msg_in_vol_slider = ctk.CTkSlider(
-            self.sidebar,
-            from_=0,
-            to=100,
-            number_of_steps=20,
-            command=self.on_message_incoming_volume_change,
-            width=170
-        )
-        self.msg_in_vol_slider.set(get_message_incoming_volume() * 100)
-        self.msg_in_vol_slider.pack(pady=(0, 5), padx=10)
-        
-        self.msg_out_vol_label = ctk.CTkLabel(self.sidebar, text="📤 Sent Message Volume", font=ctk.CTkFont(size=9))
-        self.msg_out_vol_label.pack(pady=(5, 2), padx=10)
-        
-        self.msg_out_vol_slider = ctk.CTkSlider(
-            self.sidebar,
-            from_=0,
-            to=100,
-            number_of_steps=20,
-            command=self.on_message_outgoing_volume_change,
-            width=170
-        )
-        self.msg_out_vol_slider.set(get_message_outgoing_volume() * 100)
-        self.msg_out_vol_slider.pack(pady=(0, 10), padx=10)
         self.chat_frame = ctk.CTkFrame(self, corner_radius=0, fg_color="transparent")
         self.chat_frame.grid(row=0, column=2, sticky="nsew")
         
@@ -308,7 +260,7 @@ class HexChatApp(ctk.CTk):
                     width=70,
                     height=70,
                     font=ctk.CTkFont(size=32),
-                    command=lambda sn=sound_name, cat=category: play_custom_sound(sn, cat)
+                    command=lambda sn=sound_name, cat=category: self.send_custom_sound(sn, cat)
                 )
                 btn.pack(side="left", padx=3, pady=5)
                 self.fun_sound_buttons[sound_name] = btn
@@ -1456,13 +1408,17 @@ class HexChatApp(ctk.CTk):
             # Create settings window
             settings_window = ctk.CTkToplevel(self)
             settings_window.title("Settings")
-            settings_window.geometry("450x350")
+            settings_window.geometry("500x700")
             settings_window.resizable(False, False)
             settings_window.transient(self)
             
+            # Create scrollable frame for settings
+            scroll_frame = ctk.CTkScrollableFrame(settings_window)
+            scroll_frame.pack(fill="both", expand=True, padx=10, pady=10)
+            
             # Title
             title_label = ctk.CTkLabel(
-                settings_window,
+                scroll_frame,
                 text="Audio Settings",
                 font=ctk.CTkFont(size=16, weight="bold")
             )
@@ -1472,7 +1428,7 @@ class HexChatApp(ctk.CTk):
             temp_interface = get_audio_interface()
             
             # Microphone Section
-            mic_frame = ctk.CTkFrame(settings_window)
+            mic_frame = ctk.CTkFrame(scroll_frame)
             mic_frame.pack(pady=10, padx=20, fill="x")
             
             mic_label = ctk.CTkLabel(mic_frame, text="Microphone:", font=ctk.CTkFont(size=12, weight="bold"))
@@ -1502,7 +1458,7 @@ class HexChatApp(ctk.CTk):
                     selected_mic_idx = devices[0][0]
             
             # Speaker Section
-            speaker_frame = ctk.CTkFrame(settings_window)
+            speaker_frame = ctk.CTkFrame(scroll_frame)
             speaker_frame.pack(pady=10, padx=20, fill="x")
             
             speaker_label = ctk.CTkLabel(speaker_frame, text="Speaker:", font=ctk.CTkFont(size=12, weight="bold"))
@@ -1531,9 +1487,57 @@ class HexChatApp(ctk.CTk):
                     speaker_combo.set(device_names[0])
                     selected_speaker_idx = output_devices[0][0]
             
-            # Button Frame
+            # Sound Effects Volume Control Section
+            sound_label = ctk.CTkLabel(scroll_frame, text="🔊 Sound Effects", font=ctk.CTkFont(size=12, weight="bold"))
+            sound_label.pack(pady=(20, 10), padx=20, anchor="w")
+            
+            # Call Volume
+            call_vol_label = ctk.CTkLabel(scroll_frame, text="Call Volume", font=ctk.CTkFont(size=10))
+            call_vol_label.pack(pady=(5, 2), padx=20, anchor="w")
+            
+            call_vol_slider = ctk.CTkSlider(
+                scroll_frame,
+                from_=0,
+                to=100,
+                number_of_steps=20,
+                command=self.on_call_volume_change,
+                width=300
+            )
+            call_vol_slider.set(get_call_volume() * 100)
+            call_vol_slider.pack(pady=(0, 10), padx=20, fill="x")
+            
+            # Message Volume Sliders - Separate for incoming and outgoing
+            msg_in_vol_label = ctk.CTkLabel(scroll_frame, text="📥 Received Message Volume", font=ctk.CTkFont(size=10))
+            msg_in_vol_label.pack(pady=(5, 2), padx=20, anchor="w")
+            
+            msg_in_vol_slider = ctk.CTkSlider(
+                scroll_frame,
+                from_=0,
+                to=100,
+                number_of_steps=20,
+                command=self.on_message_incoming_volume_change,
+                width=300
+            )
+            msg_in_vol_slider.set(get_message_incoming_volume() * 100)
+            msg_in_vol_slider.pack(pady=(0, 5), padx=20, fill="x")
+            
+            msg_out_vol_label = ctk.CTkLabel(scroll_frame, text="📤 Sent Message Volume", font=ctk.CTkFont(size=10))
+            msg_out_vol_label.pack(pady=(5, 2), padx=20, anchor="w")
+            
+            msg_out_vol_slider = ctk.CTkSlider(
+                scroll_frame,
+                from_=0,
+                to=100,
+                number_of_steps=20,
+                command=self.on_message_outgoing_volume_change,
+                width=300
+            )
+            msg_out_vol_slider.set(get_message_outgoing_volume() * 100)
+            msg_out_vol_slider.pack(pady=(0, 10), padx=20, fill="x")
+            
+            # Button Frame at bottom
             button_frame = ctk.CTkFrame(settings_window, fg_color="transparent")
-            button_frame.pack(pady=20, padx=20, fill="x")
+            button_frame.pack(pady=15, padx=20, fill="x", side="bottom")
             
             def save_settings():
                 """Save selected audio settings."""
@@ -1772,6 +1776,11 @@ class HexChatApp(ctk.CTk):
             
             # Send to target
             send_text_message(sound_message, target)
+            
+            # Play sound locally for sender
+            # Use play_custom_sound but it will call the callback which should NOT send again
+            # since we already sent above. The callback is for remote sound events only.
+            play_custom_sound(sound_name, category)
             
             # Display in our chat that we sent it
             self.chat_box.configure(state="normal")
