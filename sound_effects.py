@@ -9,6 +9,7 @@ Handles playing sounds for:
 - Disconnected
 - New message received
 - Call cancelled
+- Custom sounds during calls
 """
 import os
 import sys
@@ -20,6 +21,20 @@ from pathlib import Path
 _volume_call = 0.7  # Call sounds (outgoing/incoming)
 _volume_message_incoming = 0.6  # Incoming message sounds
 _volume_message_outgoing = 0.5  # Outgoing message sounds
+
+# Callback for sending custom sounds to remote peer
+_send_custom_sound_callback = None
+
+
+def set_send_custom_sound_callback(callback):
+    """
+    Set callback for sending custom sounds to the remote peer.
+    
+    Args:
+        callback: Function that takes (sound_name, category) as parameters
+    """
+    global _send_custom_sound_callback
+    _send_custom_sound_callback = callback
 
 
 def set_call_volume(volume: float):
@@ -57,18 +72,16 @@ def get_message_outgoing_volume() -> float:
 
 # Sound effect file paths
 SOUNDS_DIR = Path(__file__).parent / "sounds"
-
-# Create sounds directory if it doesn't exist
 SOUNDS_DIR.mkdir(exist_ok=True)
 
-# Sound file names
-SOUND_CALLING = SOUNDS_DIR / "calling.wav"
-SOUND_INCOMING = SOUNDS_DIR / "incoming.wav"
-SOUND_CONNECTED = SOUNDS_DIR / "connected.wav"
-SOUND_REJECTED = SOUNDS_DIR / "rejected.wav"
-SOUND_DISCONNECTED = SOUNDS_DIR / "disconnected.wav"
-SOUND_MESSAGE = SOUNDS_DIR / "message.wav"
-SOUND_CANCELLED = SOUNDS_DIR / "cancelled.wav"
+# Basic system sounds paths
+SOUND_CALLING = SOUNDS_DIR / "basic" / "calling.wav"
+SOUND_INCOMING = SOUNDS_DIR / "basic" / "incoming.wav"
+SOUND_CONNECTED = SOUNDS_DIR / "basic" / "connected.wav"
+SOUND_REJECTED = SOUNDS_DIR / "basic" / "rejected.wav"
+SOUND_DISCONNECTED = SOUNDS_DIR / "basic" / "disconnected.wav"
+SOUND_MESSAGE = SOUNDS_DIR / "basic" / "message.wav"
+SOUND_CANCELLED = SOUNDS_DIR / "basic" / "cancelled.wav"
 
 
 def _generate_tone(frequency: float, duration_ms: int) -> bytes:
@@ -111,6 +124,10 @@ def _generate_tone(frequency: float, duration_ms: int) -> bytes:
 def _create_default_sounds():
     """Create default sound files if they don't exist."""
     try:
+        # Create basic directory if needed
+        basic_dir = SOUNDS_DIR / "basic"
+        basic_dir.mkdir(exist_ok=True)
+        
         # Calling tone - repeating 880 Hz
         if not SOUND_CALLING.exists():
             wav_data = _generate_tone(880, 200)
@@ -342,6 +359,75 @@ def sound_cancelled():
     """Play sound when call is cancelled."""
     stop_all_sounds()
     play_sound(SOUND_CANCELLED, volume=_volume_call)
+
+
+def get_available_sounds(category: str = None):
+    """
+    Get all available sound files organized by category.
+    
+    Args:
+        category: Optional category filter ('fun', 'reactions', 'basic')
+        
+    Returns:
+        dict: Category -> [list of sound files]
+    """
+    available = {}
+    
+    for category_dir in SOUNDS_DIR.iterdir():
+        if not category_dir.is_dir():
+            continue
+        
+        cat_name = category_dir.name
+        if category and cat_name != category:
+            continue
+        
+        sounds = []
+        for sound_file in sorted(category_dir.glob("*.wav")):
+            sounds.append({
+                'path': sound_file,
+                'name': sound_file.stem,  # Clean name without extension
+                'display': sound_file.stem.replace('-', ' ').title()
+            })
+        
+        if sounds:
+            available[cat_name] = sounds
+    
+    return available
+
+
+def get_fun_sounds():
+    """Get all fun/reaction sounds that can be sent during calls."""
+    available = get_available_sounds()
+    fun_sounds = []
+    
+    # Include both fun and reaction categories
+    for category in ['fun', 'reactions']:
+        if category in available:
+            fun_sounds.extend(available[category])
+    
+    return fun_sounds
+
+
+def play_custom_sound(sound_name: str, category: str = 'fun'):
+    """
+    Play a custom fun/reaction sound during a call and send to remote peer.
+    
+    Args:
+        sound_name: Name of the sound (without extension)
+        category: Category ('fun' or 'reactions')
+    """
+    sound_file = SOUNDS_DIR / category / f"{sound_name}.wav"
+    if sound_file.exists():
+        play_sound(sound_file, volume=0.7)
+        
+        # Send sound to remote peer via callback
+        if _send_custom_sound_callback:
+            try:
+                _send_custom_sound_callback(sound_name, category)
+            except Exception as e:
+                print(f"[WARNING] Could not send custom sound to peer: {e}")
+    else:
+        print(f"[WARNING] Sound not found: {sound_name}")
 
 
 # Initialize sounds on import
