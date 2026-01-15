@@ -20,8 +20,9 @@ from connection_cache import (
     has_cached_connection,
     save_cache,
 )
-from chat_history import add_message, load_history, display_history, clear_history, get_formatted_message, format_timestamp
+from chat_history import add_message, load_history, display_history, clear_history, get_formatted_message, format_timestamp, format_date_header, needs_date_separator
 from network_scanner import scan_network_async, format_device_list, extract_ip_from_formatted
+from sound_effects import sound_calling, sound_incoming, sound_connected, sound_rejected, sound_disconnected, sound_message, sound_message_sent, sound_cancelled, stop_all_sounds, set_call_volume, set_message_incoming_volume, set_message_outgoing_volume, get_call_volume, get_message_incoming_volume, get_message_outgoing_volume
 
 
 # --- APPEARANCE ---
@@ -58,17 +59,31 @@ class HexChatApp(ctk.CTk):
         
         # Window Setup
         self.title("HexChat")
-        self.geometry("800x600")
+        self.geometry("1200x800")
+        
+        # Get screen dimensions and center window
+        self.update_idletasks()
+        screen_width = self.winfo_screenwidth()
+        screen_height = self.winfo_screenheight()
+        window_width = 1200
+        window_height = 800
+        x = (screen_width - window_width) // 2
+        y = (screen_height - window_height) // 2
+        self.geometry(f"{window_width}x{window_height}+{x}+{y}")
 
         # --- LAYOUT GRID ---
         self.grid_columnconfigure(0, weight=0)  # Sidebar fixed width
         self.grid_columnconfigure(1, weight=1)  # Chat area expands
         self.grid_rowconfigure(0, weight=1)     # Content expands vertically
 
-        # --- SIDEBAR (LEFT) ---
-        self.sidebar = ctk.CTkFrame(self, width=200, corner_radius=0)
-        self.sidebar.grid(row=0, column=0, sticky="nsew")
-        self.sidebar.grid_propagate(False)  # Keep sidebar at fixed width
+        # --- SIDEBAR (LEFT) with Scrollbar ---
+        self.sidebar_frame = ctk.CTkFrame(self, corner_radius=0)
+        self.sidebar_frame.grid(row=0, column=0, sticky="nsew", padx=0, pady=0)
+        self.sidebar_frame.grid_rowconfigure(0, weight=1)
+        
+        # Scrollable sidebar
+        self.sidebar = ctk.CTkScrollableFrame(self.sidebar_frame, width=220, corner_radius=0)
+        self.sidebar.grid(row=0, column=0, sticky="nsew", padx=0, pady=0)
 
         self.logo_label = ctk.CTkLabel(self.sidebar, text="HEXCHAT P2P", font=ctk.CTkFont(size=20, weight="bold"))
         self.logo_label.pack(pady=20)
@@ -162,6 +177,54 @@ class HexChatApp(ctk.CTk):
         
         self.deafen_btn = ctk.CTkSwitch(self.sidebar, text="Deafen Audio", command=self.toggle_deafen)
         self.deafen_btn.pack(pady=5, padx=10)
+
+        # Sound Effects Volume Control
+        self.sound_label = ctk.CTkLabel(self.sidebar, text="🔊 Sound Effects", font=ctk.CTkFont(size=12, weight="bold"))
+        self.sound_label.pack(pady=(20, 10), padx=10)
+        
+        # Call Volume Slider
+        self.call_vol_label = ctk.CTkLabel(self.sidebar, text="Call Volume", font=ctk.CTkFont(size=10))
+        self.call_vol_label.pack(pady=(5, 2), padx=10)
+        
+        self.call_vol_slider = ctk.CTkSlider(
+            self.sidebar,
+            from_=0,
+            to=100,
+            number_of_steps=20,
+            command=self.on_call_volume_change,
+            width=170
+        )
+        self.call_vol_slider.set(get_call_volume() * 100)
+        self.call_vol_slider.pack(pady=(0, 10), padx=10)
+        
+        # Message Volume Sliders - Separate for incoming and outgoing
+        self.msg_in_vol_label = ctk.CTkLabel(self.sidebar, text="📥 Received Message Volume", font=ctk.CTkFont(size=9))
+        self.msg_in_vol_label.pack(pady=(5, 2), padx=10)
+        
+        self.msg_in_vol_slider = ctk.CTkSlider(
+            self.sidebar,
+            from_=0,
+            to=100,
+            number_of_steps=20,
+            command=self.on_message_incoming_volume_change,
+            width=170
+        )
+        self.msg_in_vol_slider.set(get_message_incoming_volume() * 100)
+        self.msg_in_vol_slider.pack(pady=(0, 5), padx=10)
+        
+        self.msg_out_vol_label = ctk.CTkLabel(self.sidebar, text="📤 Sent Message Volume", font=ctk.CTkFont(size=9))
+        self.msg_out_vol_label.pack(pady=(5, 2), padx=10)
+        
+        self.msg_out_vol_slider = ctk.CTkSlider(
+            self.sidebar,
+            from_=0,
+            to=100,
+            number_of_steps=20,
+            command=self.on_message_outgoing_volume_change,
+            width=170
+        )
+        self.msg_out_vol_slider.set(get_message_outgoing_volume() * 100)
+        self.msg_out_vol_slider.pack(pady=(0, 10), padx=10)
 
         # --- CHAT AREA (RIGHT) ---
         self.chat_frame = ctk.CTkFrame(self, corner_radius=0, fg_color="transparent")
@@ -322,17 +385,25 @@ class HexChatApp(ctk.CTk):
             # Load chat history with this contact
             self.chat_box.configure(state="normal")
             history = load_history(target)
+            
+            from datetime import datetime
+            timestamp = datetime.now().isoformat()
+            time_str = format_timestamp(timestamp)
+            
             if history:
                 # Append call status to existing history
-                self.chat_box.insert("end", f"\n[CALLING] {target}...\n")
+                self.chat_box.insert("end", f"\n[{time_str}] 📞 CALLING {target}...\n")
             else:
-                self.chat_box.insert("end", f"[CALLING] {target}...\n")
+                self.chat_box.insert("end", f"[{time_str}] 📞 CALLING {target}...\n")
             
             self.chat_box.configure(state="disabled")
             self.chat_box.see("end")
             
             # Send call request to the target
             send_text_message("__CALL_REQUEST__", self.target_ip)
+            
+            # Play calling sound
+            sound_calling()
             
             self.connect_btn.configure(state="disabled", text="Calling...")
             self.cancel_call_btn.configure(state="normal")
@@ -383,11 +454,17 @@ class HexChatApp(ctk.CTk):
             self.call_state = "idle"
             self.target_ip = None
             self.chat_box.configure(state="normal")
-            self.chat_box.insert("end", "--- Disconnected ---\n")
+            from datetime import datetime
+            timestamp = datetime.now().isoformat()
+            time_str = format_timestamp(timestamp)
+            self.chat_box.insert("end", f"[{time_str}] 📴 Disconnected\n")
             self.chat_box.configure(state="disabled")
             self.connect_btn.configure(state="normal", text="Connect Voice/Chat")
             self.disconnect_btn.configure(state="disabled")
             self.ip_entry.configure(state="normal")
+            
+            # Play disconnected sound
+            sound_disconnected()
             
             # Restart background receiver to listen for new calls
             self.background_receiver_active = False  # Reset flag to allow restart
@@ -412,9 +489,15 @@ class HexChatApp(ctk.CTk):
                 
                 # Add to chat
                 self.chat_box.configure(state="normal")
-                self.chat_box.insert("end", f"📞 Incoming call from {caller_ip}\n")
+                from datetime import datetime
+                timestamp = datetime.now().isoformat()
+                time_str = format_timestamp(timestamp)
+                self.chat_box.insert("end", f"[{time_str}] 📞 Incoming call from {caller_ip}\n")
                 self.chat_box.configure(state="disabled")
                 self.chat_box.see("end")
+                
+                # Play incoming call sound
+                sound_incoming()
                 
                 print(f"📞 Incoming call from {caller_ip}")
         except Exception as e:
@@ -552,6 +635,24 @@ class HexChatApp(ctk.CTk):
         set_deafen_state(self.is_deafened)
         print(f"Deafened: {self.is_deafened}")
 
+    def on_call_volume_change(self, value):
+        """Handle call volume slider change."""
+        volume = float(value) / 100.0
+        set_call_volume(volume)
+        print(f"Call volume: {volume * 100:.0f}%")
+
+    def on_message_incoming_volume_change(self, value):
+        """Handle incoming message volume slider change."""
+        volume = float(value) / 100.0
+        set_message_incoming_volume(volume)
+        print(f"Incoming message volume: {volume * 100:.0f}%")
+
+    def on_message_outgoing_volume_change(self, value):
+        """Handle outgoing message volume slider change."""
+        volume = float(value) / 100.0
+        set_message_outgoing_volume(volume)
+        print(f"Outgoing message volume: {volume * 100:.0f}%")
+
     def send_msg(self, event=None):
         msg = self.msg_entry.get()
         if not msg: return
@@ -564,12 +665,27 @@ class HexChatApp(ctk.CTk):
             self.chat_box.configure(state="disabled")
             return
 
-        # Update own UI with timestamp
+        # Update own UI with timestamp and date separator if needed
         from datetime import datetime
         timestamp = datetime.now().isoformat()
-        formatted_msg = get_formatted_message("You", msg, timestamp)
         
         self.chat_box.configure(state="normal")
+        
+        # Check if we need a date separator
+        history = load_history(target)
+        if history and len(history) > 0:
+            last_msg = history[-1]
+            prev_timestamp = last_msg.get('timestamp', '')
+            if prev_timestamp and needs_date_separator(prev_timestamp, timestamp):
+                date_header = format_date_header(timestamp)
+                self.chat_box.insert("end", f"\n--- {date_header} ---\n")
+        else:
+            # First message to this contact
+            date_header = format_date_header(timestamp)
+            if "Chat History" not in self.chat_box.get("1.0", "end"):
+                self.chat_box.insert("end", f"--- {date_header} ---\n")
+        
+        formatted_msg = get_formatted_message("You", msg, timestamp)
         self.chat_box.insert("end", f"{formatted_msg}\n")
         self.chat_box.configure(state="disabled")
         self.chat_box.see("end")
@@ -579,6 +695,9 @@ class HexChatApp(ctk.CTk):
 
         # Send to network
         send_text_message(msg, target)
+        
+        # Play outgoing message sound
+        sound_message_sent()
         
         self.msg_entry.delete(0, "end")
 
@@ -599,6 +718,9 @@ class HexChatApp(ctk.CTk):
                 self.chat_box.insert("end", f"--- Connected to {self.target_ip} ---\n")
                 self.connect_btn.configure(state="disabled", text="Connected!")
                 self.disconnect_btn.configure(state="normal")
+                
+                # Play connected sound
+                sound_connected()
                 
                 try:
                     # Now start sending audio since call was accepted
@@ -627,10 +749,16 @@ class HexChatApp(ctk.CTk):
         elif message == "__CALL_REJECT__":
             if self.call_state == "calling":
                 self.call_state = "idle"
-                self.chat_box.insert("end", "--- Call rejected ---\n")
+                from datetime import datetime
+                timestamp = datetime.now().isoformat()
+                time_str = format_timestamp(timestamp)
+                self.chat_box.insert("end", f"[{time_str}] ❌ Call rejected\n")
                 self.connect_btn.configure(state="normal", text="Connect Voice/Chat")
                 self.cancel_call_btn.configure(state="disabled")
                 self.ip_entry.configure(state="normal")
+                
+                # Play rejection sound
+                sound_rejected()
                 
                 # Clean up
                 cleanup_receiver()
@@ -644,12 +772,25 @@ class HexChatApp(ctk.CTk):
         elif message == "__CALL_CANCEL__":
             if self.call_state == "ringing":
                 self.call_state = "idle"
-                self.chat_box.insert("end", "--- Call cancelled by friend ---\n")
+                from datetime import datetime
+                timestamp = datetime.now().isoformat()
+                time_str = format_timestamp(timestamp)
+                self.chat_box.insert("end", f"[{time_str}] ❌ Call cancelled by friend\n")
                 self.call_frame.pack_forget()
                 self.incoming_call_ip = None
+                
+                # Play cancelled sound
+                sound_cancelled()
         # Check for disconnection
         elif message == "__DISCONNECT__":
-            self.chat_box.insert("end", "--- Friend disconnected ---\n")
+            from datetime import datetime
+            timestamp = datetime.now().isoformat()
+            time_str = format_timestamp(timestamp)
+            self.chat_box.insert("end", f"[{time_str}] 📴 Friend disconnected\n")
+            
+            # Play disconnected sound
+            sound_disconnected()
+            
             # Auto-disconnect both ways
             if self.is_connected:
                 self.disconnect()
@@ -657,8 +798,13 @@ class HexChatApp(ctk.CTk):
         else:
             from datetime import datetime
             timestamp = datetime.now().isoformat()
-            formatted_msg = get_formatted_message("Friend", message, timestamp)
-            self.chat_box.insert("end", f"{formatted_msg}\n")
+            
+            # Check if we need a date separator (compare with last message if available)
+            self._add_message_with_date_separator("Friend", message, timestamp)
+            
+            # Play message received sound
+            sound_message()
+            
             # Save incoming message to history
             if self.target_ip:
                 add_message(self.target_ip, "Friend", message)
@@ -683,8 +829,13 @@ class HexChatApp(ctk.CTk):
         else:
             from datetime import datetime
             timestamp = datetime.now().isoformat()
-            formatted_msg = get_formatted_message("Friend", message, timestamp)
-            self.chat_box.insert("end", f"{formatted_msg}\n")
+            
+            # Add message with date separator if needed
+            self._add_message_with_date_separator("Friend", message, timestamp)
+            
+            # Play message received sound
+            sound_message()
+            
             # Always save message to history using sender IP
             add_message(sender_ip, "Friend", message)
             # Update target IP if not set (for text-only conversations)
@@ -694,19 +845,86 @@ class HexChatApp(ctk.CTk):
         self.chat_box.configure(state="disabled")
         self.chat_box.see("end")
 
+    def _add_message_with_date_separator(self, sender: str, message: str, timestamp: str):
+        """
+        Add a message to chat box with automatic date separator if date changed.
+        
+        Args:
+            sender: Message sender name
+            message: Message text
+            timestamp: ISO timestamp string
+        """
+        # Get the last message's timestamp from the chat box if available
+        try:
+            # Get all content from chat box to find last timestamp
+            content = self.chat_box.get("1.0", "end")
+            lines = content.strip().split("\n")
+            
+            # Check if we need a date separator
+            need_separator = True
+            if lines:
+                # Look for the last actual message (skip separators and empty lines)
+                for line in reversed(lines):
+                    if line.strip() and not line.startswith("---"):
+                        # Found a message line, extract timestamp
+                        if "[" in line and "]" in line:
+                            # This looks like a formatted message, but we need to check dates
+                            curr_date = format_date_header(timestamp)
+                            # Conservatively add separator if content exists
+                            if "Chat History" not in content and "End of History" not in content:
+                                # Try to find a previous message with timestamp in storage
+                                if self.target_ip:
+                                    history = load_history(self.target_ip)
+                                    if history and len(history) > 0:
+                                        last_msg = history[-1]
+                                        prev_timestamp = last_msg.get('timestamp', '')
+                                        if prev_timestamp and needs_date_separator(prev_timestamp, timestamp):
+                                            need_separator = True
+                                        else:
+                                            need_separator = False
+                        break
+            
+            # Add date separator if needed
+            if need_separator and self.target_ip:
+                history = load_history(self.target_ip)
+                if history and len(history) > 0:
+                    last_msg = history[-1]
+                    prev_timestamp = last_msg.get('timestamp', '')
+                    if prev_timestamp and needs_date_separator(prev_timestamp, timestamp):
+                        date_header = format_date_header(timestamp)
+                        self.chat_box.insert("end", f"\n--- {date_header} ---\n")
+        except Exception:
+            pass  # If anything goes wrong, just add the message
+        
+        # Add the message
+        formatted_msg = get_formatted_message(sender, message, timestamp)
+        self.chat_box.insert("end", f"{formatted_msg}\n")
+
     def load_previous_chat(self, contact_ip: str):
-        """Load and display previous chat history with a contact."""
+        """Load and display previous chat history with a contact (with date separators like WhatsApp/Discord)."""
         try:
             history = load_history(contact_ip)
             if history:
                 self.chat_box.configure(state="normal")
                 self.chat_box.insert("end", f"=== Chat History with {contact_ip} ===\n")
                 
-                # Show last 50 messages with timestamps
-                for msg in history[-50:]:
+                # Show last 50 messages with date separators
+                messages_to_show = history[-50:]
+                prev_date = None
+                
+                for msg in messages_to_show:
                     sender = msg.get('sender', 'Unknown')
                     text = msg.get('message', '')
                     timestamp = msg.get('timestamp', '')
+                    
+                    # Check if we need a date separator
+                    curr_date = format_date_header(timestamp)
+                    if curr_date != prev_date:
+                        # Add date separator
+                        self.chat_box.insert("end", f"\n--- {curr_date} ---\n")
+                        prev_date = curr_date
+                    
+                    # Add the message with time only
                     formatted_msg = get_formatted_message(sender, text, timestamp)
                     self.chat_box.insert("end", f"{formatted_msg}\n")
                 
@@ -748,12 +966,24 @@ class HexChatApp(ctk.CTk):
             history = load_history(ip)
             if history:
                 self.chat_box.insert("end", f"=== Chat History with {ip} ===\n")
+                
+                # Display with date separators
+                prev_date = None
                 for msg in history:
                     sender = msg.get('sender', 'Unknown')
                     text = msg.get('message', '')
                     timestamp = msg.get('timestamp', '')
+                    
+                    # Check if we need a date separator
+                    curr_date = format_date_header(timestamp)
+                    if curr_date != prev_date:
+                        # Add date separator
+                        self.chat_box.insert("end", f"\n--- {curr_date} ---\n")
+                        prev_date = curr_date
+                    
                     formatted_msg = get_formatted_message(sender, text, timestamp)
                     self.chat_box.insert("end", f"{formatted_msg}\n")
+                
                 self.chat_box.insert("end", "=== End of History ===\n\n")
             else:
                 self.chat_box.insert("end", f"[New chat with {ip}]\n\n")
