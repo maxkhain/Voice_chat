@@ -10,8 +10,8 @@ from audio_modules.audio_io import (
     close_stream,
     close_audio_interface
 )
-from audio_modules.audio_sender import send_audio, cleanup_sender, send_text_message
-from audio_modules.audio_receiver import receive_audio, cleanup_receiver, set_text_message_callback, set_deafen_state, set_incoming_call_callback, reset_receiver_socket
+from audio_modules.audio_sender import send_audio, cleanup_sender, send_text_message, set_mute_state, stop_sender, reset_stop_flag as reset_sender_stop_flag
+from audio_modules.audio_receiver import receive_audio, cleanup_receiver, set_text_message_callback, set_deafen_state, set_incoming_call_callback, reset_receiver_socket, stop_receiver, reset_stop_flag as reset_receiver_stop_flag
 from audio_modules.audio_filter import reset_noise_profile
 from utils.connection_cache import (
     get_last_connection,
@@ -61,6 +61,7 @@ class HexChatApp(ctk.CTk):
         self.calling_popup = None  # Track calling popup window
         self.last_scan_results = []  # Store last network scan results
         self.sidebar_width = 250  # Initial sidebar width (in pixels)
+        self.chat_input_height = 80  # Initial chat input height (in pixels) - smaller for more chat space
         
         # Load cached values
         last_ip = get_last_connection()
@@ -79,16 +80,20 @@ class HexChatApp(ctk.CTk):
         # Store last IP for later use
         self.last_loaded_ip = last_ip
         
+        # Recently used emojis tracking
+        self.recent_emojis = []
+        self.max_recent_emojis = 20
+        
         # Window Setup
         self.title("HexChat")
-        self.geometry("1200x800")
+        self.geometry("1400x900")
         
         # Get screen dimensions and center window
         self.update_idletasks()
         screen_width = self.winfo_screenwidth()
         screen_height = self.winfo_screenheight()
-        window_width = 1200
-        window_height = 800
+        window_width = 1400
+        window_height = 900
         x = (screen_width - window_width) // 2
         y = (screen_height - window_height) // 2
         self.geometry(f"{window_width}x{window_height}+{x}+{y}")
@@ -171,7 +176,9 @@ class HexChatApp(ctk.CTk):
         self.chat_frame = ctk.CTkFrame(self, corner_radius=0, fg_color="transparent")
         self.chat_frame.grid(row=0, column=2, sticky="nsew")
         
-        self.chat_frame.grid_rowconfigure(0, weight=1) # Tabs expand
+        self.chat_frame.grid_rowconfigure(0, weight=1)  # Chat tabs expand
+        self.chat_frame.grid_rowconfigure(1, weight=0, minsize=6)  # Separator (6px for better grabbing)
+        self.chat_frame.grid_rowconfigure(2, weight=0, minsize=self.chat_input_height)  # Input frame with adjustable height
         self.chat_frame.grid_columnconfigure(0, weight=1)
         
         # Tabbed Chat Interface
@@ -196,9 +203,16 @@ class HexChatApp(ctk.CTk):
         self.current_chat_ip = None
         self.chat_box = self.general_chat_box  # Default to general chat
 
-        # Message Input Area (below tabs)
+        # --- CHAT/INPUT SEPARATOR (DRAGGABLE) ---
+        self.chat_separator = ctk.CTkFrame(self.chat_frame, height=6, fg_color="gray40")
+        self.chat_separator.grid(row=1, column=0, sticky="ew", padx=10)
+        self.chat_separator.bind("<Button-1>", self.on_chat_separator_drag_start)
+        self.chat_separator.bind("<B1-Motion>", self.on_chat_separator_drag)
+        self.chat_separator.configure(cursor="sb_v_double_arrow")  # Vertical resize cursor
+
+        # Message Input Area (below separator)
         self.input_frame = ctk.CTkFrame(self.chat_frame, fg_color="transparent")
-        self.input_frame.grid(row=1, column=0, sticky="ew", padx=10, pady=10)
+        self.input_frame.grid(row=2, column=0, sticky="nsew", padx=10, pady=10)
         self.input_frame.grid_columnconfigure(0, weight=1)
         
         # IP selection dropdown for chat
@@ -233,9 +247,9 @@ class HexChatApp(ctk.CTk):
         self.send_btn = ctk.CTkButton(self.input_frame, text="Send", width=60, command=self.send_msg)
         self.send_btn.pack(side="right")
         
-        # Fun Sounds Panel (on right side, below chat)
+        # Fun Sounds Panel (below input area)
         self.fun_sounds_panel_frame = ctk.CTkFrame(self.chat_frame, fg_color="transparent")
-        self.fun_sounds_panel_frame.grid(row=2, column=0, sticky="ew", padx=10, pady=(5, 10))
+        self.fun_sounds_panel_frame.grid(row=3, column=0, sticky="ew", padx=10, pady=(5, 10))
         self.fun_sounds_panel_frame.grid_columnconfigure(0, weight=1)
         
         # Horizontal scrollable frame for sound buttons
@@ -269,34 +283,47 @@ class HexChatApp(ctk.CTk):
             placeholder = ctk.CTkLabel(self.fun_sounds_frame, text="No fun sounds found", text_color="gray", font=ctk.CTkFont(size=9))
             placeholder.pack(padx=10, pady=10)
 
-        # Emoji Panel (collapsible)
-        self.emoji_panel_frame = ctk.CTkFrame(self.chat_frame, fg_color="transparent")
-        self.emoji_panel_frame.grid(row=3, column=0, sticky="ew", padx=10, pady=(5, 10))
+        # Emoji Panel (collapsible) with categories
+        self.emoji_panel_frame = ctk.CTkFrame(self.chat_frame, height=200)
+        self.emoji_panel_frame.grid(row=4, column=0, sticky="ew", padx=10, pady=(5, 10))
         self.emoji_panel_frame.grid_columnconfigure(0, weight=1)
-        
-        # Horizontal scrollable frame for emoji buttons
-        self.emoji_frame = ctk.CTkScrollableFrame(self.emoji_panel_frame, fg_color="transparent", orientation="horizontal")
-        self.emoji_frame.pack(fill="x", expand=True)
+        self.emoji_panel_frame.grid_propagate(False)  # Fix height
         
         # Track emoji panel state
         self.emoji_panel_visible = False
-        self.emoji_panel_frame.pack_forget()  # Hide initially
+        self.emoji_panel_frame.grid_remove()  # Hide initially (use grid_remove, not pack_forget!)
         
-        # Create emoji buttons with better styling
-        emojis = "😊😂😍🥰😎👍👎✌️🙏🤝❤️💔💛💚💙🔥⚡✨🌟💫🎉🎊🎈🎁🎀😭😡😱😴🤔😶😬😲🙈🙉🙊🤤😪😷🤒🤕😵🤮🤢🤯🤠🥴😕😟☹️🙁😞😖😢😤😠😈👿💀☠️😻😸😹😺😼😽🙀😿😾🎭"
+        # Emoji categories with emojis
+        self.emoji_categories = {
+            "⏱️ Recent": [],  # Will be populated dynamically
+            "😊 Smileys": "😀😃😄😁😆😅🤣😂🙂🙃😉😊😇🥰😍🤩😘😗☺😚😙🥲😋😛😜🤪😝🤑🤗🤭🤫🤔🤐🤨😐😑😶😏😒🙄😬🤥😌😔😪🤤😴😷🤒🤕🤢🤮🤧🥵🥶🥴😵🤯🤠🥳🥸😎🤓🧐😕😟🙁☹😮😯😲😳🥺😦😧😨😰😥😢😭😱😖😣😞😓😩😫🥱😤😡😠🤬",
+            "👋 Gestures": "👋🤚🖐✋🖖👌🤌🤏✌🤞🤟🤘🤙👈👉👆🖕👇☝👍👎✊👊🤛🤜👏🙌👐🤲🤝🙏✍💅🤳💪🦾🦿🦵🦶👂🦻👃🧠🫀🫁🦷🦴👀👁👅👄",
+            "❤️ Hearts": "❤🧡💛💚💙💜🖤🤍🤎💔❣💕💞💓💗💖💘💝💟❤️‍🔥❤️‍🩹💋",
+            "🎉 Celebration": "🎉🎊🎈🎁🎀🪅🎗🎟🎫🎖🏆🏅🥇🥈🥉⚽🏀🏈⚾🥎🎾🏐🏉🥏🎱🪀🏓🏸🏒🏑🥍🏏🪃🥅⛳🪁🏹🎣🤿🥊🥋🎽🛹🛼🛷⛸🥌🎿⛷🏂🪂",
+            "🌟 Symbols": "⭐🌟💫✨⚡🔥💥💢💦💨🕳💣💬👁‍🗨🗨🗯💭💤🔔🔕🎵🎶🎼🎤🎧📻🎷🪗🎸🎹🎺🎻🪕🥁🪘",
+            "🐱 Animals": "🐶🐱🐭🐹🐰🦊🐻🐼🐻‍❄️🐨🐯🦁🐮🐷🐽🐸🐵🙈🙉🙊🐒🐔🐧🐦🐤🐣🐥🦆🦅🦉🦇🐺🐗🐴🦄🐝🪱🐛🦋🐌🐞🐜🪰🪲🪳🦟🦗🕷🕸🦂🐢🐍🦎🦖🦕🐙🦑🦐🦞🦀🐡🐠🐟🐬🐳🐋🦈🦭🐊🐅🐆🦓🦍🦧🦣🐘🦛🦏🐪🐫🦒🦘🦬🐃🐂🐄🐎🐖🐏🐑🦙🐐🦌🐕🐩🦮🐕‍🦺🐈🐈‍⬛🪶🐓🦃🦤🦚🦜🦢🦩🕊🐇🦝🦨🦡🦫🦦🦥🐁🐀🐿🦔🐾🐉🐲",
+            "🍕 Food": "🍏🍎🍐🍊🍋🍌🍉🍇🍓🫐🍈🍒🍑🥭🍍🥥🥝🍅🍆🥑🥦🥬🥒🌶🫑🌽🥕🫒🧄🧅🥔🍠🥐🥯🍞🥖🥨🧀🥚🍳🧈🥞🧇🥓🥩🍗🍖🦴🌭🍔🍟🍕🫓🥪🥙🧆🌮🌯🫔🥗🥘🫕🥫🍝🍜🍲🍛🍣🍱🥟🦪🍤🍙🍚🍘🍥🥠🥮🍢🍡🍧🍨🍦🥧🧁🍰🎂🍮🍭🍬🍫🍿🍩🍪🌰🥜🍯🥛🍼🫖☕🍵🧃🥤🧋🍶🍺🍻🥂🍷🥃🍸🍹🧉🍾🧊🥄🍴🍽🥣🥡🥢🧂",
+            "🚗 Travel": "🚗🚕🚙🚌🚎🏎🚓🚑🚒🚐🛻🚚🚛🚜🦯🦽🦼🛴🚲🛵🏍🛺🚨🚔🚍🚘🚖🚡🚠🚟🚃🚋🚞🚝🚄🚅🚈🚂🚆🚇🚊🚉✈🛫🛬🛩💺🛰🚀🛸🚁🛶⛵🚤🛥🛳⛴🚢⚓🪝⛽🚧🚦🚥🚏🗺🗿🗽🗼🏰🏯🏟🎡🎢🎠⛲⛱🏖🏝🏜🌋⛰🏔🗻🏕⛺🛖🏠🏡🏘🏚🏗🏭🏢🏬🏣🏤🏥🏦🏨🏪🏫🏩💒🏛⛪🕌🕍🛕🕋⛩🛤🛣🗾🎑🏞🌅🌄🌠🎇🎆🌇🌆🏙🌃🌌🌉🌁"
+        }
         
-        for emoji in emojis:
-            emoji_btn = ctk.CTkButton(
-                self.emoji_frame,
-                text=emoji,
-                width=50,
-                height=50,
-                font=ctk.CTkFont(size=24),
-                fg_color="transparent",
-                border_width=0,
-                command=lambda e=emoji: self.insert_emoji_char(e)
-            )
-            emoji_btn.pack(side="left", padx=2, pady=4)
+        # Create tabview for emoji categories
+        self.emoji_tabview = ctk.CTkTabview(self.emoji_panel_frame, height=180)
+        self.emoji_tabview.pack(fill="both", expand=True, padx=5, pady=5)
+        
+        # Create tabs for each category
+        self.emoji_tab_frames = {}
+        for category_name, emojis in self.emoji_categories.items():
+            tab = self.emoji_tabview.add(category_name)
+            
+            # Create scrollable frame for emojis
+            emoji_scroll = ctk.CTkScrollableFrame(tab, orientation="horizontal", height=100)
+            emoji_scroll.pack(fill="both", expand=True)
+            
+            self.emoji_tab_frames[category_name] = emoji_scroll
+            
+            # Add emoji buttons (skip Recent tab - will be populated dynamically)
+            if category_name != "⏱️ Recent":
+                self._populate_emoji_tab(emoji_scroll, emojis)
 
         # Start background receiver to listen for incoming calls
         self.start_background_receiver()
@@ -340,6 +367,27 @@ class HexChatApp(ctk.CTk):
                 self.sidebar.configure(width=self.sidebar_width)
         except Exception as e:
             print(f"Error resizing sidebar: {e}")
+
+    def on_chat_separator_drag_start(self, event):
+        """Handle start of chat/input separator drag."""
+        self.chat_drag_start_y = event.y_root
+        self.chat_drag_start_height = self.chat_input_height
+
+    def on_chat_separator_drag(self, event):
+        """Handle separator drag to resize chat and input areas."""
+        try:
+            # Calculate new height based on mouse movement
+            # Negative delta when dragging up, positive when dragging down
+            delta = event.y_root - self.chat_drag_start_y
+            # Invert delta: dragging up should increase input area
+            new_height = max(80, min(self.chat_drag_start_height - delta, 400))  # Min 80px, max 400px
+            
+            if new_height != self.chat_input_height:
+                self.chat_input_height = new_height
+                # Update input frame height
+                self.chat_frame.grid_rowconfigure(2, minsize=new_height)
+        except Exception as e:
+            print(f"Error resizing chat area: {e}")
 
     def start_background_receiver(self):
         """Start a background receiver thread to listen for incoming calls."""
@@ -458,6 +506,10 @@ class HexChatApp(ctk.CTk):
 
     def connect(self):
         """Initiate a voice call to the target IP."""
+        # Reset stop flags to allow audio threads to run
+        reset_receiver_stop_flag()
+        reset_sender_stop_flag()
+        
         # Prevent multiple simultaneous calls
         if self.call_state == "calling" or self.is_connected:
             print("[!] Already in a call or connecting")
@@ -810,6 +862,10 @@ class HexChatApp(ctk.CTk):
     def accept_call(self):
         """Accept incoming call request."""
         try:
+            # Reset stop flags to allow audio threads to run
+            reset_receiver_stop_flag()
+            reset_sender_stop_flag()
+            
             if not self.incoming_call_ip:
                 return
             
@@ -917,6 +973,7 @@ class HexChatApp(ctk.CTk):
 
     def toggle_mute(self):
         self.is_muted = self.mute_btn.get()
+        set_mute_state(self.is_muted)
         print(f"Muted: {self.is_muted}")
 
     def toggle_deafen(self):
@@ -1050,11 +1107,74 @@ class HexChatApp(ctk.CTk):
     def toggle_emoji_panel(self):
         """Toggle visibility of emoji panel."""
         if self.emoji_panel_visible:
-            self.emoji_panel_frame.pack_forget()
+            self.emoji_panel_frame.grid_remove()
             self.emoji_panel_visible = False
         else:
-            self.emoji_panel_frame.grid(row=3, column=0, sticky="ew", padx=10, pady=(5, 10))
+            self.emoji_panel_frame.grid(row=4, column=0, sticky="ew", padx=10, pady=(5, 10))
+            self._refresh_recent_emojis()  # Update recent emojis when showing panel
             self.emoji_panel_visible = True
+
+    def _populate_emoji_tab(self, frame, emojis: str):
+        """Populate an emoji tab with emoji buttons."""
+        for emoji in emojis:
+            btn = ctk.CTkButton(
+                frame,
+                text=emoji,
+                width=45,
+                height=45,
+                font=ctk.CTkFont(family="Segoe UI Emoji", size=22),
+                fg_color="transparent",
+                hover_color=("gray75", "gray25"),
+                border_width=0,
+                command=lambda e=emoji: self.insert_emoji_char(e)
+            )
+            btn.pack(side="left", padx=1, pady=2)
+    
+    def _refresh_recent_emojis(self):
+        """Refresh the recent emojis tab."""
+        recent_frame = self.emoji_tab_frames.get("⏱️ Recent")
+        if recent_frame:
+            # Clear existing buttons
+            for widget in recent_frame.winfo_children():
+                widget.destroy()
+            
+            # Add recent emojis
+            if self.recent_emojis:
+                for emoji in self.recent_emojis:
+                    btn = ctk.CTkButton(
+                        recent_frame,
+                        text=emoji,
+                        width=45,
+                        height=45,
+                        font=ctk.CTkFont(family="Segoe UI Emoji", size=22),
+                        fg_color="transparent",
+                        hover_color=("gray75", "gray25"),
+                        border_width=0,
+                        command=lambda e=emoji: self.insert_emoji_char(e)
+                    )
+                    btn.pack(side="left", padx=1, pady=2)
+            else:
+                # Show placeholder
+                placeholder = ctk.CTkLabel(
+                    recent_frame,
+                    text="No recent emojis yet",
+                    text_color="gray",
+                    font=ctk.CTkFont(size=11)
+                )
+                placeholder.pack(padx=10, pady=20)
+    
+    def _add_to_recent_emojis(self, emoji: str):
+        """Add emoji to recent emojis list."""
+        # Remove if already exists (to move to front)
+        if emoji in self.recent_emojis:
+            self.recent_emojis.remove(emoji)
+        
+        # Add to front
+        self.recent_emojis.insert(0, emoji)
+        
+        # Trim to max size
+        if len(self.recent_emojis) > self.max_recent_emojis:
+            self.recent_emojis = self.recent_emojis[:self.max_recent_emojis]
 
     def insert_emoji_char(self, emoji: str):
         """Insert emoji at cursor position in message entry."""
@@ -1068,6 +1188,9 @@ class HexChatApp(ctk.CTk):
         # Set cursor after inserted emoji
         self.msg_entry.icursor(insert_pos + len(emoji))
         self.msg_entry.focus()
+        
+        # Track recently used emoji
+        self._add_to_recent_emojis(emoji)
 
     def receive_msg_update(self, message):
         # This function is called when a message arrives
@@ -1722,6 +1845,19 @@ class HexChatApp(ctk.CTk):
     def on_closing(self):
         """Handle window close event - disconnect from call and clean up."""
         try:
+            print("[APP] Closing application, cleaning up audio threads...")
+            
+            # Signal all audio threads to stop
+            stop_sender()
+            stop_receiver()
+            
+            # Send disconnect message to the other user in any active state
+            if self.target_ip and self.call_state != "idle":
+                try:
+                    send_text_message("__DISCONNECT__", self.target_ip)
+                except Exception:
+                    pass
+            
             # Cancel outgoing call if in calling state
             if self.call_state == "calling":
                 self.cancel_call()
@@ -1730,26 +1866,52 @@ class HexChatApp(ctk.CTk):
             if self.is_connected:
                 self.disconnect()
             
-            # Close any open popups
+            # Close any open popups safely
             if self.incoming_call_popup:
                 try:
-                    self.incoming_call_popup.destroy()
+                    # Use after to avoid drawing conflict
+                    self.incoming_call_popup.after(50, self.incoming_call_popup.destroy)
                 except:
                     pass
             
             if self.calling_popup:
                 try:
-                    self.calling_popup.destroy()
+                    # Use after to avoid drawing conflict
+                    self.calling_popup.after(50, self.calling_popup.destroy)
                 except:
                     pass
             
-            # Clean up background receiver
+            # Clean up background receiver and sender
             cleanup_receiver()
+            cleanup_sender()
             
+            # Close audio streams if they exist
+            try:
+                if hasattr(self, 'background_output_stream') and self.background_output_stream:
+                    close_stream(self.background_output_stream)
+            except Exception:
+                pass
+            
+            try:
+                if hasattr(self, 'input_stream') and self.input_stream:
+                    close_stream(self.input_stream)
+            except Exception:
+                pass
+            
+            # Close audio interface if it exists
+            try:
+                if hasattr(self, 'audio_interface') and self.audio_interface:
+                    close_audio_interface(self.audio_interface)
+            except Exception:
+                pass
+            
+            print("[APP] Cleanup complete, closing window")
             # Destroy the main window
             self.destroy()
         except Exception as e:
             print(f"Error during window close: {e}")
+            import traceback
+            traceback.print_exc()
             # Force close if cleanup fails
             self.destroy()
 
