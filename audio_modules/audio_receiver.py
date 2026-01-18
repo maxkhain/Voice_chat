@@ -28,9 +28,6 @@ _text_message_callback_with_sender = None  # Callback that includes sender IP
 # Callback for incoming call requests
 _incoming_call_callback = None
 
-# Callback for disconnect notifications
-_disconnect_callback = None
-
 # Audio state
 _is_deafened = False
 
@@ -51,16 +48,6 @@ def set_incoming_call_callback(callback):
     """Set the callback function to be called when a call request is received."""
     global _incoming_call_callback
     _incoming_call_callback = callback
-
-
-def set_disconnect_callback(callback):
-    """Set the callback function to be called when a disconnect notification is received.
-    
-    Args:
-        callback: Function(sender_ip) - called when a user disconnects
-    """
-    global _disconnect_callback
-    _disconnect_callback = callback
 
 
 def set_deafen_state(is_deafened):
@@ -145,10 +132,6 @@ def receive_audio(output_stream):
                     if message == "__CALL_REQUEST__" and _incoming_call_callback:
                         print(f"[RX] Calling incoming_call_callback with {sender_ip}")
                         _incoming_call_callback(message, sender_ip)
-                    # Check if it's a disconnect notification
-                    elif message == "__DISCONNECT__" and _disconnect_callback:
-                        print(f"[RX] 📴 User {sender_ip} disconnected")
-                        _disconnect_callback(sender_ip)
                     elif _text_message_callback_with_sender:
                         print(f"[RX] Calling text_message_callback_with_sender from {sender_ip}")
                         _text_message_callback_with_sender(message, sender_ip)

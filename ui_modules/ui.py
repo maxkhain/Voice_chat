@@ -11,7 +11,7 @@ from audio_modules.audio_io import (
     close_audio_interface
 )
 from audio_modules.audio_sender import send_audio, cleanup_sender, send_text_message, set_mute_state, stop_sender, reset_stop_flag as reset_sender_stop_flag
-from audio_modules.audio_receiver import receive_audio, cleanup_receiver, set_text_message_callback, set_deafen_state, set_incoming_call_callback, reset_receiver_socket, stop_receiver, reset_stop_flag as reset_receiver_stop_flag, set_call_audio_volume, get_call_audio_volume, set_online_status_callback, set_disconnect_callback
+from audio_modules.audio_receiver import receive_audio, cleanup_receiver, set_text_message_callback, set_deafen_state, set_incoming_call_callback, reset_receiver_socket, stop_receiver, reset_stop_flag as reset_receiver_stop_flag
 from audio_modules.audio_filter import reset_noise_profile
 from utils.connection_cache import (
     get_last_connection,
@@ -399,7 +399,6 @@ class HexChatApp(ctk.CTk):
                 # Set callbacks first
                 set_text_message_callback(self.receive_msg_update, self.receive_msg_update_with_sender)
                 set_incoming_call_callback(self.show_incoming_call)
-                set_disconnect_callback(self.on_remote_disconnect)
                 set_send_custom_sound_callback(self.send_custom_sound)
                 set_deafen_state(False)
                 
@@ -649,72 +648,6 @@ class HexChatApp(ctk.CTk):
                 print(f"📞 Incoming call from {caller_ip}")
         except Exception as e:
             print(f"Error showing incoming call: {e}")
-            import traceback
-            traceback.print_exc()
-    
-    def on_remote_disconnect(self, sender_ip):
-        """Handle remote user disconnect notification.
-        
-        Args:
-            sender_ip: IP address of the user who disconnected
-        """
-        try:
-            # Check if this is from our connected peer
-            if self.is_connected and self.target_ip == sender_ip:
-                print(f"📴 Remote user {sender_ip} disconnected")
-                
-                # Show disconnect notification in chat
-                self.chat_box.configure(state="normal")
-                from datetime import datetime
-                timestamp = datetime.now().isoformat()
-                time_str = format_timestamp(timestamp)
-                self.chat_box.insert("end", f"[{time_str}] 📴 Remote user disconnected\n")
-                self.chat_box.configure(state="disabled")
-                self.chat_box.see("end")
-                
-                # Play disconnected sound
-                sound_disconnected()
-                
-                # Auto-disconnect our side
-                self.disconnect()
-                
-                # Show notification popup
-                notification = ctk.CTkToplevel(self)
-                notification.title("Disconnected")
-                notification.geometry("350x150")
-                notification.resizable(False, False)
-                notification.attributes('-topmost', True)
-                notification.transient(self)
-                
-                title_label = ctk.CTkLabel(
-                    notification,
-                    text="Connection Lost",
-                    font=ctk.CTkFont(size=16, weight="bold")
-                )
-                title_label.pack(pady=20)
-                
-                msg_label = ctk.CTkLabel(
-                    notification,
-                    text=f"Remote user {sender_ip} disconnected",
-                    font=ctk.CTkFont(size=12)
-                )
-                msg_label.pack(pady=10)
-                
-                ok_btn = ctk.CTkButton(
-                    notification,
-                    text="OK",
-                    command=notification.destroy,
-                    fg_color="gray60"
-                )
-                ok_btn.pack(pady=20)
-                
-                # Auto-close after 5 seconds
-                notification.after(5000, lambda: notification.destroy() if notification.winfo_exists() else None)
-            else:
-                # Disconnect from unknown user (just log it)
-                print(f"📴 User {sender_ip} disconnected (not our peer)")
-        except Exception as e:
-            print(f"Error handling remote disconnect: {e}")
             import traceback
             traceback.print_exc()
     
