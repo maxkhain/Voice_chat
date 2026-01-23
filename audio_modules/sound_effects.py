@@ -21,6 +21,8 @@ from pathlib import Path
 _volume_call = 0.7  # Call sounds (outgoing/incoming)
 _volume_message_incoming = 0.6  # Incoming message sounds
 _volume_message_outgoing = 0.5  # Outgoing message sounds
+_volume_incoming_voice = 1.0  # Incoming voice volume
+_volume_sound_effects = 0.5  # Fun/reaction sound effects (50% default)
 
 # Callback for sending custom sounds to remote peer
 _send_custom_sound_callback = None
@@ -68,6 +70,28 @@ def get_message_incoming_volume() -> float:
 def get_message_outgoing_volume() -> float:
     """Get current outgoing message sounds volume."""
     return _volume_message_outgoing
+
+
+def set_incoming_voice_volume(volume: float):
+    """Set volume for incoming voice audio. Range: 0.0 to 1.0"""
+    global _volume_incoming_voice
+    _volume_incoming_voice = max(0.0, min(1.0, volume))
+
+
+def get_incoming_voice_volume() -> float:
+    """Get current incoming voice volume."""
+    return _volume_incoming_voice
+
+
+def set_sound_effects_volume(volume: float):
+    """Set volume for fun/reaction sound effects. Range: 0.0 to 1.0"""
+    global _volume_sound_effects
+    _volume_sound_effects = max(0.0, min(1.0, volume))
+
+
+def get_sound_effects_volume() -> float:
+    """Get current fun/reaction sound effects volume."""
+    return _volume_sound_effects
 
 
 # Sound effect file paths
@@ -252,7 +276,12 @@ def play_sound(sound_file: Path, loop: bool = False, volume: float = 1.0):
     def _play_in_thread():
         try:
             if sys.platform == "win32":
-                _play_sound_windows(sound_file, loop)
+                # For looping sounds on Windows, use winsound (can be stopped with stop_all_sounds)
+                if loop:
+                    _play_sound_windows(sound_file, loop)
+                else:
+                    # For non-looping sounds, use pygame for volume control
+                    _play_sound_cross_platform(sound_file, loop, volume)
             else:
                 _play_sound_cross_platform(sound_file, loop, volume)
         except Exception as e:
@@ -305,13 +334,14 @@ def stop_all_sounds():
     try:
         if sys.platform == "win32":
             import winsound
-            winsound.PlaySound(None, 0)  # Stop all sounds on Windows
-        else:
-            try:
-                import pygame
+            winsound.PlaySound(None, 0)  # Stop winsound on Windows
+        # Also stop pygame sounds (used for volume-controlled playback)
+        try:
+            import pygame
+            if pygame.mixer.get_init():
                 pygame.mixer.stop()
-            except Exception:
-                pass
+        except Exception:
+            pass
     except Exception as e:
         print(f"[WARNING] Could not stop sounds: {e}")
 
@@ -421,7 +451,7 @@ def play_custom_sound(sound_name: str, category: str = 'fun'):
     """
     sound_file = SOUNDS_DIR / category / f"{sound_name}.wav"
     if sound_file.exists():
-        play_sound(sound_file, volume=0.7)
+        play_sound(sound_file, volume=_volume_sound_effects)
     else:
         print(f"[WARNING] Sound not found: {sound_name}")
 

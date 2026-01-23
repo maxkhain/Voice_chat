@@ -31,7 +31,7 @@ from config.contacts import (
     search_contacts
 )
 from utils.scan_cache import save_scan_results, load_scan_results
-from audio_modules.sound_effects import sound_calling, sound_incoming, sound_connected, sound_rejected, sound_disconnected, sound_message, sound_cancelled, stop_all_sounds, set_call_volume, set_message_incoming_volume, set_message_outgoing_volume, get_call_volume, get_message_incoming_volume, get_message_outgoing_volume, get_fun_sounds, play_custom_sound, set_send_custom_sound_callback
+from audio_modules.sound_effects import sound_calling, sound_incoming, sound_connected, sound_rejected, sound_disconnected, sound_message, sound_cancelled, stop_all_sounds, set_call_volume, set_message_incoming_volume, set_message_outgoing_volume, get_call_volume, get_message_incoming_volume, get_message_outgoing_volume, get_fun_sounds, play_custom_sound, set_send_custom_sound_callback, set_incoming_voice_volume, get_incoming_voice_volume, set_sound_effects_volume, get_sound_effects_volume
 
 
 # --- APPEARANCE ---
@@ -999,6 +999,18 @@ class HexChatApp(ctk.CTk):
         set_message_outgoing_volume(volume)
         print(f"Outgoing message volume: {volume * 100:.0f}%")
 
+    def on_incoming_voice_volume_change(self, value):
+        """Handle incoming voice volume slider change."""
+        volume = float(value) / 100.0
+        set_incoming_voice_volume(volume)
+        print(f"Incoming voice volume: {volume * 100:.0f}%")
+
+    def on_sound_effects_volume_change(self, value):
+        """Handle sound effects (fun/reactions) volume slider change."""
+        volume = float(value) / 100.0
+        set_sound_effects_volume(volume)
+        print(f"Sound effects volume: {volume * 100:.0f}%")
+
     def create_or_switch_chat_tab(self, ip: str):
         """Create a new chat tab for an IP or switch to existing one."""
         if ip in self.chat_boxes:
@@ -1657,6 +1669,40 @@ class HexChatApp(ctk.CTk):
             )
             msg_out_vol_slider.set(get_message_outgoing_volume() * 100)
             msg_out_vol_slider.pack(pady=(0, 10), padx=20, fill="x")
+            
+            # --- INCOMING AUDIO SECTION ---
+            incoming_label = ctk.CTkLabel(scroll_frame, text="🎧 Incoming Audio", font=ctk.CTkFont(size=12, weight="bold"))
+            incoming_label.pack(pady=(20, 10), padx=20, anchor="w")
+            
+            # Incoming Voice Volume
+            voice_vol_label = ctk.CTkLabel(scroll_frame, text="🎤 Incoming Voice Volume", font=ctk.CTkFont(size=10))
+            voice_vol_label.pack(pady=(5, 2), padx=20, anchor="w")
+            
+            voice_vol_slider = ctk.CTkSlider(
+                scroll_frame,
+                from_=0,
+                to=100,
+                number_of_steps=20,
+                command=self.on_incoming_voice_volume_change,
+                width=300
+            )
+            voice_vol_slider.set(get_incoming_voice_volume() * 100)
+            voice_vol_slider.pack(pady=(0, 10), padx=20, fill="x")
+            
+            # Sound Effects Volume (Fun/Reaction sounds)
+            sfx_vol_label = ctk.CTkLabel(scroll_frame, text="🎵 Sound Effects Volume (Fun/Reactions)", font=ctk.CTkFont(size=10))
+            sfx_vol_label.pack(pady=(5, 2), padx=20, anchor="w")
+            
+            sfx_vol_slider = ctk.CTkSlider(
+                scroll_frame,
+                from_=0,
+                to=100,
+                number_of_steps=20,
+                command=self.on_sound_effects_volume_change,
+                width=300
+            )
+            sfx_vol_slider.set(get_sound_effects_volume() * 100)
+            sfx_vol_slider.pack(pady=(0, 10), padx=20, fill="x")
             
             # Button Frame at bottom
             button_frame = ctk.CTkFrame(settings_window, fg_color="transparent")

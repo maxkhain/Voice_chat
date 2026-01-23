@@ -4,9 +4,11 @@ Audio receiving functionality.
 import socket
 import select
 import time
-from audio_modules.audio_config import CHUNK, PORT
+import numpy as np
+from audio_modules.audio_config import CHUNK, PORT, FORMAT
 import audio_modules.audio_sender as audio_sender
 from audio_modules.audio_encryption import decrypt_audio, decrypt_text, initialize_encryption
+from audio_modules.sound_effects import get_incoming_voice_volume
 
 # Socket for receiving
 sock = None
@@ -177,6 +179,15 @@ def receive_audio(output_stream):
             
             # Decrypt audio data
             decrypted_data = decrypt_audio(latest_data)
+            
+            # Apply incoming voice volume adjustment
+            if decrypted_data:
+                volume = get_incoming_voice_volume()
+                if volume < 1.0:
+                    # Convert bytes to numpy array for volume adjustment
+                    audio_array = np.frombuffer(decrypted_data, dtype=np.int16)
+                    audio_array = (audio_array * volume).astype(np.int16)
+                    decrypted_data = audio_array.tobytes()
             
             # Play ONLY the latest packet (discard old ones)
             # But only if not deafened
