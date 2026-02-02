@@ -1,0 +1,13 @@
+{
+  "volumes": {
+    "call": 36,
+    "message_incoming": 32,
+    "message_outgoing": 32,
+    "incoming_voice": 33,
+    "sound_effects": 50
+  },
+  "devices": {
+    "microphone_index": null,
+    "speaker_index": null
+  }
+}

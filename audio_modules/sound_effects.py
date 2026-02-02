@@ -87,6 +87,7 @@ def set_sound_effects_volume(volume: float):
     """Set volume for fun/reaction sound effects. Range: 0.0 to 1.0"""
     global _volume_sound_effects
     _volume_sound_effects = max(0.0, min(1.0, volume))
+    print(f"[DEBUG] Sound effects volume set to: {_volume_sound_effects}")
 
 
 def get_sound_effects_volume() -> float:
@@ -314,10 +315,14 @@ def _play_sound_windows(sound_file: Path, loop: bool = False):
 def _play_sound_cross_platform(sound_file: Path, loop: bool = False, volume: float = 1.0):
     """Play sound using pygame mixer (cross-platform fallback)."""
     try:
-        import pygame  # noqa - optional dependency for fallback
-        pygame.mixer.init()
+        import pygame
+        # Initialize mixer only once
+        if not pygame.mixer.get_init():
+            pygame.mixer.init()
+        
         sound = pygame.mixer.Sound(str(sound_file))
         sound.set_volume(volume)  # Set volume (0.0 to 1.0)
+        print(f"[DEBUG] Pygame playing {sound_file.name} at volume {volume}")
         
         if loop:
             sound.play(-1)  # Loop indefinitely
@@ -326,7 +331,9 @@ def _play_sound_cross_platform(sound_file: Path, loop: bool = False, volume: flo
     except ImportError:
         print("[WARNING] pygame not installed, skipping sound playback")
     except Exception as e:
-        print(f"[WARNING] Pygame fallback failed: {e}")
+        print(f"[WARNING] Pygame playback failed: {e}")
+        import traceback
+        traceback.print_exc()
 
 
 def stop_all_sounds():
@@ -451,6 +458,7 @@ def play_custom_sound(sound_name: str, category: str = 'fun'):
     """
     sound_file = SOUNDS_DIR / category / f"{sound_name}.wav"
     if sound_file.exists():
+        print(f"[DEBUG] Playing {sound_name} at volume {_volume_sound_effects}")
         play_sound(sound_file, volume=_volume_sound_effects)
     else:
         print(f"[WARNING] Sound not found: {sound_name}")
