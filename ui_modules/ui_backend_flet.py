@@ -45,6 +45,20 @@ from audio_modules.sound_effects import (
 )
 
 
+# Protocol message constants
+CMD_CALL_REQUEST = "__CALL_REQUEST__"
+CMD_CALL_ACCEPT = "__CALL_ACCEPT__"
+CMD_CALL_REJECT = "__CALL_REJECT__"
+CMD_CALL_CANCEL = "__CALL_CANCEL__"
+CMD_DISCONNECT = "__DISCONNECT__"
+
+# Call states
+STATE_IDLE = "idle"
+STATE_CALLING = "calling"
+STATE_RINGING = "ringing"
+STATE_CONNECTED = "connected"
+
+
 # Colors class for dialog styling
 class Colors:
     BG_PRIMARY = "#36393f"
@@ -61,10 +75,18 @@ class Colors:
 
 
 class HexChatBackend:
-    """Backend logic handler for HexChat Flet app."""
+    """Backend logic handler for HexChat Flet app.
+    
+    Manages voice chat connections, audio streams, call handling,
+    and message routing between UI and audio modules.
+    """
     
     def __init__(self, layout):
-        """Initialize backend with reference to UI layout."""
+        """Initialize backend with reference to UI layout.
+        
+        Args:
+            layout: HexChatFletLayout instance for UI updates
+        """
         self.layout = layout
         self.page = layout.page
         
@@ -79,7 +101,7 @@ class HexChatBackend:
         self.is_muted = False
         self.is_deafened = False
         self.is_connected = False
-        self.call_state = "idle"  # idle, calling, ringing, connected
+        self.call_state = STATE_IDLE
         
         # Thread references
         self.receiver_thread = None
@@ -117,7 +139,11 @@ class HexChatBackend:
             print(f"Could not load cache: {e}")
     
     def start_background_receiver(self):
-        """Start background listener for incoming calls."""
+        """Start background receiver thread to listen for incoming calls and messages.
+        
+        Creates a persistent audio stream and receiver thread that runs in the background,
+        allowing the app to receive calls and messages even when not connected.
+        """
         try:
             if not self.background_receiver_active:
                 reset_receiver_socket()
@@ -162,18 +188,21 @@ class HexChatBackend:
     
     # ==================== CONNECTION MANAGEMENT ====================
     def connect(self):
-        """Initiate a voice call to the target IP."""
+        """Initiate a voice call to the selected contact.
+        
+        Validates target selection, sends call request, plays calling sound,
+        and displays calling popup.
+        """
         reset_receiver_stop_flag()
         reset_sender_stop_flag()
         
-        if self.call_state == "calling" or self.is_connected:
+        if self.call_state == STATE_CALLING or self.is_connected:
             print("[!] Already in a call or connecting")
             return
         
         # ALWAYS get target from contacts dropdown
         contact_display = self.layout.contacts_dropdown.value
         if contact_display:
-            from config.contacts import extract_ip_from_contact_display
             ip = extract_ip_from_contact_display(contact_display)
             if ip:
                 self.target_ip = ip
@@ -188,18 +217,17 @@ class HexChatBackend:
             return
         
         try:
-            self.call_state = "calling"
+            self.call_state = STATE_CALLING
             
             if not self.audio_interface:
                 self.audio_interface = get_audio_interface()
             
-            timestamp = datetime.now().isoformat()
             self.layout.add_system_message(
                 "General",
                 f"📞 CALLING {self.target_ip}..."
             )
             
-            send_text_message("__CALL_REQUEST__", self.target_ip)
+            send_text_message(CMD_CALL_REQUEST, self.target_ip)
             sound_calling()
             
             self.layout.connect_btn.disabled = True
@@ -215,129 +243,191 @@ class HexChatBackend:
             print(f"Connection error: {e}")
     
     def disconnect(self):
-        """Disconnect from voice chat."""
+        """Disconnect from voice chat and clean up all resources."""
         try:
             import time
             
+            # Notify peer of disconnection
             if self.is_connected and self.target_ip:
                 try:
-                    send_text_message("__DISCONNECT__", self.target_ip)
-                except Exception:
-                    pass
+                    send_text_message(CMD_DISCONNECT, self.target_ip)
+                except Exception as e:
+                    print(f"Could not notify peer: {e}")
             
-            cleanup_sender()
-            cleanup_receiver()
+            # Clean up audio resources with individual error handling
+            try:
+                cleanup_sender()
+            except Exception as e:
+                print(f"Error cleaning up sender: {e}")
+            
+            try:
+                cleanup_receiver()
+            except Exception as e:
+                print(f"Error cleaning up receiver: {e}")
+            
             time.sleep(0.2)
             
+            # Close streams safely
             if self.input_stream:
-                close_stream(self.input_stream)
-                self.input_stream = None
+                try:
+                    close_stream(self.input_stream)
+                except Exception as e:
+                    print(f"Error closing input stream: {e}")
+                finally:
+                    self.input_stream = None
+            
             if self.output_stream and self.output_stream != self.background_output_stream:
-                close_stream(self.output_stream)
-            self.output_stream = None
+                try:
+                    close_stream(self.output_stream)
+                except Exception as e:
+                    print(f"Error closing output stream: {e}")
+                finally:
+                    self.output_stream = None
             
             if self.audio_interface:
-                close_audio_interface(self.audio_interface)
-                self.audio_interface = None
+                try:
+                    close_audio_interface(self.audio_interface)
+                except Exception as e:
+                    print(f"Error closing audio interface: {e}")
+                finally:
+                    self.audio_interface = None
             
+            # Update state
             self.is_connected = False
-            self.call_state = "idle"
+            self.call_state = STATE_IDLE
             
-            self.layout.add_system_message("General", "📴 Disconnected")
-            self.layout.connect_btn.disabled = False
-            self.layout.connect_btn.text = "Connect Voice/Chat"
-            self.layout.disconnect_btn.disabled = True
-            self.page.update()
+            # Update UI
+            self._update_ui_idle("📴 Disconnected")
             
             sound_disconnected()
             
+            # Restart background receiver
             self.background_receiver_active = False
             self.start_background_receiver()
             
             print("✓ Disconnected from voice chat")
         except Exception as e:
             print(f"Disconnect error: {e}")
+            # Ensure state is reset even on error
+            self.is_connected = False
+            self.call_state = STATE_IDLE
+            self.input_stream = None
+            self.output_stream = None
+            self.audio_interface = None
     
     # ==================== CALL HANDLING ====================
+    def _is_self_call(self, caller_ip):
+        """Check if call is from the same machine (self-call).
+        
+        Args:
+            caller_ip: IP address of the caller
+            
+        Returns:
+            bool: True if this is a self-call
+        """
+        local_ip = get_local_ip()
+        return (caller_ip == local_ip or 
+                caller_ip == "127.0.0.1" or 
+                caller_ip == self.target_ip == local_ip)
+    
+    def _is_mutual_call(self, caller_ip):
+        """Check if both parties are calling each other simultaneously.
+        
+        Args:
+            caller_ip: IP address of the caller
+            
+        Returns:
+            bool: True if this is a mutual call
+        """
+        is_self = self._is_self_call(caller_ip)
+        return (self.call_state == STATE_CALLING and 
+                (caller_ip == self.target_ip or is_self))
+    
+    def _setup_audio_connection(self, target_ip):
+        """Setup audio streams and start sender thread.
+        
+        Args:
+            target_ip: IP address to connect to
+        """
+        if not self.audio_interface:
+            self.audio_interface = get_audio_interface()
+        
+        self.input_stream = open_input_stream(
+            self.audio_interface,
+            self.selected_device_index
+        )
+        self.output_stream = self.background_output_stream
+        
+        reset_noise_profile()
+        set_deafen_state(self.is_deafened)
+        save_cache(
+            target_ip,
+            self.selected_device_index,
+            self.selected_output_device_index
+        )
+        
+        self.sender_thread = threading.Thread(
+            target=send_audio,
+            args=(self.input_stream, self.output_stream, self.target_ip),
+            daemon=True
+        )
+        self.sender_thread.start()
+    
+    def _update_ui_connected(self, message):
+        """Update UI to connected state.
+        
+        Args:
+            message: Message to display
+        """
+        self.layout.add_system_message("General", message)
+        self.layout.connect_btn.disabled = True
+        self.layout.connect_btn.text = "Connected!"
+        self.layout.disconnect_btn.disabled = False
+        self.page.update()
+    
+    def _update_ui_idle(self, message):
+        """Update UI to idle state.
+        
+        Args:
+            message: Message to display
+        """
+        self.layout.add_system_message("General", message)
+        self.layout.connect_btn.disabled = False
+        self.layout.connect_btn.text = "Connect Voice/Chat"
+        self.layout.disconnect_btn.disabled = True
+        self.page.update()
+    
+    def _get_display_name(self, ip):
+        """Get display name for IP (contact name if exists, otherwise IP).
+        
+        Args:
+            ip: IP address
+            
+        Returns:
+            str: Contact name or IP address
+        """
+        contact_name = get_contact_name(ip)
+        return contact_name if contact_name else ip
+    
     def show_incoming_call(self, message, caller_ip):
-        """Show incoming call notification."""
+        """Show incoming call notification and handle mutual call detection.
+        
+        Args:
+            message: Protocol message (should be CMD_CALL_REQUEST)
+            caller_ip: IP address of the caller
+        """
         try:
-            if message == "__CALL_REQUEST__":
-                # Get local IP for self-call detection
-                local_ip = get_local_ip()
-                
-                # Check for self-call (calling your own machine)
-                is_self_call = (caller_ip == local_ip or 
-                               caller_ip == "127.0.0.1" or 
-                               caller_ip == self.target_ip == local_ip)
-                
-                # Check for mutual call scenario (both users calling each other)
-                is_mutual_call = (self.call_state == "calling" and 
-                                 (caller_ip == self.target_ip or is_self_call))
-                
-                if is_mutual_call:
-                    # Mutual call or self-call detected - auto-accept immediately
-                    print(f"[DEBUG] Mutual/self call detected with {caller_ip} - auto-accepting")
-                    stop_all_sounds()  # Stop the calling sound
-                    
-                    # Close calling popup if open
-                    self._close_all_call_popups()
-                    
-                    # Set state to connected
-                    self.incoming_call_ip = None
-                    self.call_state = "connected"
-                    self.is_connected = True
-                    
-                    # Update UI
-                    self.layout.add_system_message(
-                        "General",
-                        f"✅ Mutual call - connected to {caller_ip}"
-                    )
-                    self.layout.connect_btn.disabled = True
-                    self.layout.connect_btn.text = "Connected!"
-                    self.layout.disconnect_btn.disabled = False
-                    self.page.update()
-                    
-                    # Start audio in background
-                    def setup_mutual_call_audio():
-                        try:
-                            if not self.audio_interface:
-                                self.audio_interface = get_audio_interface()
-                            
-                            self.input_stream = open_input_stream(
-                                self.audio_interface,
-                                self.selected_device_index
-                            )
-                            self.output_stream = self.background_output_stream
-                            
-                            reset_noise_profile()
-                            save_cache(
-                                caller_ip,
-                                self.selected_device_index,
-                                self.selected_output_device_index
-                            )
-                            
-                            self.sender_thread = threading.Thread(
-                                target=send_audio,
-                                args=(self.input_stream, self.output_stream, self.target_ip),
-                                daemon=True
-                            )
-                            self.sender_thread.start()
-                            
-                            # Send accept to complete handshake
-                            send_text_message("__CALL_ACCEPT__", self.target_ip)
-                            
-                            sound_connected()
-                            print(f"✓ Mutual call connected with {caller_ip}")
-                        except Exception as e:
-                            print(f"Error in mutual call audio setup: {e}")
-                    
-                    threading.Thread(target=setup_mutual_call_audio, daemon=True).start()
+            if message == CMD_CALL_REQUEST:
+                # Check for mutual call or self-call scenario
+                if self._is_mutual_call(caller_ip):
+                    # Auto-accept mutual/self-call
+                    print(f"[INFO] Mutual/self call detected with {caller_ip} - auto-accepting")
+                    self._handle_mutual_call_accept(caller_ip)
                     return
                 
                 # Normal incoming call
                 self.incoming_call_ip = caller_ip
-                self.call_state = "ringing"
+                self.call_state = STATE_RINGING
                 
                 self.layout.add_system_message(
                     "General",
@@ -352,12 +442,43 @@ class HexChatBackend:
         except Exception as e:
             print(f"Error showing incoming call: {e}")
     
-    def show_incoming_call_popup(self, caller_ip):
-        """Show incoming call dialog."""
-        contact_name = get_contact_name(caller_ip)
-        display_name = contact_name if contact_name else caller_ip
+    def _handle_mutual_call_accept(self, caller_ip):
+        """Handle auto-accept for mutual call scenario.
         
-        # Create dialog first
+        Args:
+            caller_ip: IP address of the caller
+        """
+        stop_all_sounds()
+        self._close_all_call_popups()
+        
+        # Update state
+        self.incoming_call_ip = None
+        self.call_state = STATE_CONNECTED
+        self.is_connected = True
+        
+        # Update UI
+        self._update_ui_connected(f"✅ Mutual call - connected to {caller_ip}")
+        
+        # Setup audio in background thread
+        def setup_audio():
+            try:
+                self._setup_audio_connection(caller_ip)
+                send_text_message(CMD_CALL_ACCEPT, self.target_ip)
+                sound_connected()
+                print(f"✓ Mutual call connected with {caller_ip}")
+            except Exception as e:
+                print(f"Error in mutual call audio setup: {e}")
+        
+        threading.Thread(target=setup_audio, daemon=True).start()
+    
+    def show_incoming_call_popup(self, caller_ip):
+        """Display incoming call dialog with accept/reject buttons.
+        
+        Args:
+            caller_ip: IP address of the incoming caller
+        """
+        display_name = self._get_display_name(caller_ip)
+        
         dialog = ft.AlertDialog(
             modal=True,
             title=ft.Text("📞 Incoming Call", size=20, weight=ft.FontWeight.BOLD),
@@ -372,16 +493,13 @@ class HexChatBackend:
         )
         
         def accept_call(e):
-            # Let accept_call handle all the cleanup
             print("[DEBUG] Accept button clicked")
             self.accept_call()
         
         def reject_call(e):
-            # Let reject_call handle all the cleanup
             print("[DEBUG] Reject button clicked")
             self.reject_call()
         
-        # Add buttons with callbacks
         dialog.actions = [
             ft.ElevatedButton(
                 "✅ Accept",
@@ -401,14 +519,15 @@ class HexChatBackend:
         self.page.overlay.append(dialog)
         dialog.open = True
         self.page.update()
-        print("[DEBUG] Incoming call popup opened")
     
     def show_calling_popup(self, target_ip):
-        """Show outgoing call dialog."""
-        contact_name = get_contact_name(target_ip)
-        display_name = contact_name if contact_name else target_ip
+        """Display outgoing call dialog with cancel button.
         
-        # Create dialog first
+        Args:
+            target_ip: IP address being called
+        """
+        display_name = self._get_display_name(target_ip)
+        
         dialog = ft.AlertDialog(
             modal=True,
             title=ft.Text("📞 Calling...", size=20, weight=ft.FontWeight.BOLD),
@@ -424,11 +543,9 @@ class HexChatBackend:
         )
         
         def cancel_call(e):
-            # Let cancel_call handle all the cleanup
             print("[DEBUG] Cancel button clicked")
             self.cancel_call()
         
-        # Add cancel button with the callback
         dialog.actions = [
             ft.ElevatedButton(
                 "Cancel",
@@ -442,12 +559,10 @@ class HexChatBackend:
         self.page.overlay.append(dialog)
         dialog.open = True
         self.page.update()
-        print(f"[DEBUG] Calling popup opened for {target_ip}")
     
     def _close_all_call_popups(self):
-        """Helper to close all call-related popups immediately."""
+        """Close all active call dialogs (incoming and outgoing)."""
         try:
-            # Stop any call sounds first
             stop_all_sounds()
             
             # Close incoming call popup
@@ -467,14 +582,17 @@ class HexChatBackend:
                 self.calling_popup = None
             
             self.page.update()
-            print("[DEBUG] All popups closed")
         except Exception as e:
             print(f"Error closing popups: {e}")
             import traceback
             traceback.print_exc()
     
     def accept_call(self):
-        """Accept incoming call."""
+        """Accept incoming call and establish audio connection.
+        
+        Closes call popup, sets up audio streams in background thread,
+        and notifies the caller that the call was accepted.
+        """
         try:
             reset_receiver_stop_flag()
             reset_sender_stop_flag()
@@ -489,50 +607,19 @@ class HexChatBackend:
             self._close_all_call_popups()
             
             self.target_ip = caller_ip
-            self.call_state = "connected"
+            self.call_state = STATE_CONNECTED
             self.incoming_call_ip = None
             self.is_connected = True
             
             # Update UI immediately
-            self.layout.add_system_message(
-                "General",
-                f"✅ Call accepted with {caller_ip}"
-            )
-            self.layout.connect_btn.disabled = True
-            self.layout.connect_btn.text = "Connected!"
-            self.layout.disconnect_btn.disabled = False
-            self.page.update()
+            self._update_ui_connected(f"✅ Call accepted with {caller_ip}")
             
             # Run audio setup in background thread to not block UI
             def setup_audio():
                 try:
-                    self.audio_interface = get_audio_interface()
-                    self.input_stream = open_input_stream(
-                        self.audio_interface,
-                        self.selected_device_index
-                    )
-                    self.output_stream = self.background_output_stream
-                    
-                    save_cache(
-                        caller_ip,
-                        self.selected_device_index,
-                        self.selected_output_device_index
-                    )
-                    
-                    reset_noise_profile()
-                    set_deafen_state(self.is_deafened)
-                    
-                    self.sender_thread = threading.Thread(
-                        target=send_audio,
-                        args=(self.input_stream, self.output_stream, self.target_ip),
-                        daemon=True
-                    )
-                    self.sender_thread.start()
-                    
-                    send_text_message("__CALL_ACCEPT__", self.target_ip)
-                    
+                    self._setup_audio_connection(caller_ip)
+                    send_text_message(CMD_CALL_ACCEPT, self.target_ip)
                     sound_connected()
-                    
                     print(f"✓ Call accepted from {caller_ip}")
                 except Exception as e:
                     print(f"Error in audio setup: {e}")
@@ -543,7 +630,7 @@ class HexChatBackend:
             print(f"Error accepting call: {e}")
     
     def reject_call(self):
-        """Reject incoming call."""
+        """Reject incoming call and notify the caller."""
         try:
             if not self.incoming_call_ip:
                 return
@@ -553,10 +640,10 @@ class HexChatBackend:
             # Close all popups FIRST
             self._close_all_call_popups()
             
-            send_text_message("__CALL_REJECT__", caller_ip)
+            send_text_message(CMD_CALL_REJECT, caller_ip)
             
             self.incoming_call_ip = None
-            self.call_state = "idle"
+            self.call_state = STATE_IDLE
             
             self.layout.add_system_message("General", "❌ Call rejected")
             self.page.update()
@@ -568,35 +655,46 @@ class HexChatBackend:
             print(f"Error rejecting call: {e}")
     
     def cancel_call(self):
-        """Cancel outgoing call."""
+        """Cancel outgoing call and clean up resources."""
         try:
             target_ip = self.target_ip
             
-            # Stop all sounds first (calling ringtone)
             stop_all_sounds()
-            
-            # Close all popups using the helper method
             self._close_all_call_popups()
             
             if target_ip:
-                send_text_message("__CALL_CANCEL__", target_ip)
+                try:
+                    send_text_message(CMD_CALL_CANCEL, target_ip)
+                except Exception as e:
+                    print(f"Could not notify peer: {e}")
             
-            cleanup_receiver()
+            # Clean up with individual error handling
+            try:
+                cleanup_receiver()
+            except Exception as e:
+                print(f"Error cleaning up receiver: {e}")
+            
             if self.output_stream:
-                close_stream(self.output_stream)
-                self.output_stream = None
-            if self.audio_interface:
-                close_audio_interface(self.audio_interface)
-                self.audio_interface = None
+                try:
+                    close_stream(self.output_stream)
+                except Exception as e:
+                    print(f"Error closing stream: {e}")
+                finally:
+                    self.output_stream = None
             
-            self.call_state = "idle"
+            if self.audio_interface:
+                try:
+                    close_audio_interface(self.audio_interface)
+                except Exception as e:
+                    print(f"Error closing interface: {e}")
+                finally:
+                    self.audio_interface = None
+            
+            self.call_state = STATE_IDLE
             self.target_ip = None
             self.incoming_call_ip = None
             
-            self.layout.add_system_message("General", "❌ Call cancelled")
-            self.layout.connect_btn.disabled = False
-            self.layout.connect_btn.text = "Connect Voice/Chat"
-            self.page.update()
+            self._update_ui_idle("❌ Call cancelled")
             
             sound_cancelled()
             
@@ -609,105 +707,74 @@ class HexChatBackend:
     
     # ==================== MESSAGE HANDLING ====================
     def receive_msg_update(self, message, sender_ip=None):
-        """Handle received messages.
+        """Handle received protocol messages and text messages.
         
         Args:
-            message: The message content
+            message: The message content or protocol command
             sender_ip: IP address of the sender (for validation)
         """
-        if message == "__CALL_ACCEPT__":
+        if message == CMD_CALL_ACCEPT:
             # Validate sender - must be from the person we're calling
             if sender_ip and self.target_ip and sender_ip != self.target_ip:
-                print(f"[SECURITY] Ignoring __CALL_ACCEPT__ from {sender_ip}, expected {self.target_ip}")
+                print(f"[SECURITY] Ignoring {CMD_CALL_ACCEPT} from {sender_ip}, expected {self.target_ip}")
                 return
             
-            if self.call_state == "calling":
+            if self.call_state == STATE_CALLING:
                 # Close all popups
                 self._close_all_call_popups()
                 
-                self.call_state = "connected"
+                self.call_state = STATE_CONNECTED
                 self.is_connected = True
                 
-                self.layout.add_system_message(
-                    "General",
-                    f"✅ Connected to {self.target_ip}"
-                )
-                self.layout.connect_btn.disabled = True
-                self.layout.connect_btn.text = "Connected!"
-                self.layout.disconnect_btn.disabled = False
-                self.page.update()
+                self._update_ui_connected(f"✅ Connected to {self.target_ip}")
                 
                 sound_connected()
                 
                 # Start audio streams
                 try:
-                    if not self.audio_interface:
-                        self.audio_interface = get_audio_interface()
-                    
-                    self.input_stream = open_input_stream(
-                        self.audio_interface,
-                        self.selected_device_index
-                    )
-                    self.output_stream = self.background_output_stream
-                    
-                    reset_noise_profile()
-                    save_cache(
-                        self.target_ip,
-                        self.selected_device_index,
-                        self.selected_output_device_index
-                    )
-                    
-                    self.sender_thread = threading.Thread(
-                        target=send_audio,
-                        args=(self.input_stream, self.output_stream, self.target_ip),
-                        daemon=True
-                    )
-                    self.sender_thread.start()
+                    self._setup_audio_connection(self.target_ip)
                 except Exception as e:
                     print(f"Error starting audio: {e}")
         
-        elif message == "__CALL_REJECT__":
+        elif message == CMD_CALL_REJECT:
             # Validate sender - must be from the person we're calling
             if sender_ip and self.target_ip and sender_ip != self.target_ip:
-                print(f"[SECURITY] Ignoring __CALL_REJECT__ from {sender_ip}, expected {self.target_ip}")
+                print(f"[SECURITY] Ignoring {CMD_CALL_REJECT} from {sender_ip}, expected {self.target_ip}")
                 return
             
-            if self.call_state == "calling":
+            if self.call_state == STATE_CALLING:
                 # Close all popups
                 self._close_all_call_popups()
                 
-                self.call_state = "idle"
+                self.call_state = STATE_IDLE
                 self.target_ip = None
-                self.layout.add_system_message("General", "❌ Call rejected by friend")
-                self.layout.connect_btn.disabled = False
-                self.layout.connect_btn.text = "Connect Voice/Chat"
-                self.page.update()
+                self._update_ui_idle("❌ Call rejected by friend")
                 
                 sound_rejected()
                 
                 cleanup_receiver()
         
-        elif message == "__CALL_CANCEL__":
+        elif message == CMD_CALL_CANCEL:
             # Validate sender - must be from the person who called us
             if sender_ip and self.incoming_call_ip and sender_ip != self.incoming_call_ip:
-                print(f"[SECURITY] Ignoring __CALL_CANCEL__ from {sender_ip}, expected {self.incoming_call_ip}")
+                print(f"[SECURITY] Ignoring {CMD_CALL_CANCEL} from {sender_ip}, expected {self.incoming_call_ip}")
                 return
             
-            if self.call_state == "ringing":
+            if self.call_state == STATE_RINGING:
                 # Close all popups
                 self._close_all_call_popups()
                 
-                self.call_state = "idle"
+                self.call_state = STATE_IDLE
                 self.incoming_call_ip = None
                 self.layout.add_system_message("General", "❌ Call cancelled by friend")
                 self.page.update()
                 
                 sound_cancelled()
         
-        elif message == "__DISCONNECT__":
+        elif message == CMD_DISCONNECT:
             # Validate sender - must be from connected peer
             if sender_ip and self.target_ip and sender_ip != self.target_ip:
-                print(f"[SECURITY] Ignoring __DISCONNECT__ from {sender_ip}, expected {self.target_ip}")
+                print(f"[SECURITY] Ignoring {CMD_DISCONNECT} from {sender_ip}, expected {self.target_ip}")
                 return
             
             self.layout.add_system_message("General", "📴 Friend disconnected")
@@ -725,7 +792,6 @@ class HexChatBackend:
             
             # Ensure chat tab exists
             if chat_name != "General" and chat_name not in self.layout.chat_tabs:
-                from config.contacts import get_contact_name
                 contact_name = get_contact_name(chat_name)
                 display = f"{contact_name} - {chat_name}" if contact_name else chat_name
                 self.layout.switch_to_chat_tab(display)
@@ -741,7 +807,11 @@ class HexChatBackend:
                 add_message(history_ip, "Friend", message)
     
     def send_message(self):
-        """Send text message."""
+        """Send text message to selected contact.
+        
+        Validates target selection, sends message, and updates UI.
+        Creates chat tab if it doesn't exist.
+        """
         message = self.layout.message_input.value
         if not message:
             return
@@ -758,7 +828,6 @@ class HexChatBackend:
             chat_name = "General"
         else:
             # Extract IP from selected contact
-            from config.contacts import extract_ip_from_contact_display
             ip = extract_ip_from_contact_display(target_display)
             if ip:
                 self.target_ip = ip
@@ -777,7 +846,6 @@ class HexChatBackend:
             # Ensure chat tab exists for this contact
             if chat_name != "General" and chat_name not in self.layout.chat_tabs:
                 # Create the tab by switching to it first
-                from config.contacts import get_contact_name
                 contact_name = get_contact_name(chat_name)
                 display = f"{contact_name} - {chat_name}" if contact_name else chat_name
                 self.layout.switch_to_chat_tab(display)
@@ -797,7 +865,7 @@ class HexChatBackend:
     
     # ==================== AUDIO CONTROLS ====================
     def toggle_mute(self):
-        """Toggle microphone mute."""
+        """Toggle microphone mute state and update UI."""
         self.is_muted = not self.is_muted
         set_mute_state(self.is_muted)
         
@@ -807,7 +875,7 @@ class HexChatBackend:
         self.page.update()
     
     def toggle_deafen(self):
-        """Toggle speaker deafen."""
+        """Toggle speaker deafen state and update UI."""
         self.is_deafened = not self.is_deafened
         set_deafen_state(self.is_deafened)
         
@@ -818,18 +886,21 @@ class HexChatBackend:
     
     # ==================== CONTACTS & NETWORK ====================
     def refresh_contacts(self):
-        """Reload contacts list."""
+        """Reload and update contacts list in UI."""
         contacts = get_contacts_display_list()
         self.layout.update_contacts_list(contacts)
         self.page.update()
     
     def select_contact(self, contact_display):
-        """Select a contact to connect to."""
+        """Select a contact as the current call/chat target.
+        
+        Args:
+            contact_display: Contact display string from dropdown
+        """
         ip = extract_ip_from_contact_display(contact_display)
         if ip:
             self.target_ip = ip
-            contact_name = get_contact_name(ip)
-            display = contact_name if contact_name else ip
+            display = self._get_display_name(ip)
             self.layout.add_system_message("General", f"📌 Selected: {display}")
             self.page.update()
 

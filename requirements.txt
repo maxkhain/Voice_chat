@@ -1,0 +1,20 @@
+# Required Python packages for HexChat
+
+# UI Framework
+flet>=0.23.0
+
+# Audio Processing
+sounddevice>=0.4.6
+numpy>=1.26.0
+
+# Sound Effects
+pygame>=2.6.0
+
+# Security
+cryptography>=41.0.0
+
+# Windows Integration
+pywin32>=306; sys_platform == 'win32'
+
+# Optional: For building executable
+# pyinstaller>=6.0.0
